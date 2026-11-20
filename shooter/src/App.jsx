@@ -101,7 +101,7 @@ export default function App({ entry = null }) {
           <button className="bomb-button" disabled={hud.status !== 'playing' || !hud.bombs} onClick={() => game.current?.bomb()}><span>ボムを使う</span><kbd>X</kbd></button>
           <button className="pause-flight" disabled={!['playing', 'paused', 'transition'].includes(hud.status)} onClick={() => game.current?.pause()}>{hud.status === 'paused' ? '再開する' : '一時停止'}</button>
         </div>
-        <p className="input-hint"><span>WASD / 方向キーで移動</span><span>タッチ：ドラッグで移動</span></p>
+        <p className="input-hint"><span>WASD / 方向キーで移動</span><span className="focus-hint">Shift：低速移動</span><span>タッチ：ドラッグで移動</span></p>
       </aside>
     </main>
     <dialog className="help-dialog" ref={help} onClose={closeHelp} aria-labelledby="help-title">
