@@ -1,5 +1,9 @@
 export const WAVE_DURATIONS = [25, 48, 8];
 
+// Power 3 deals up to ~43 damage/second. Let escorts finish their opening
+// and tanks unfold their pattern; focused fire can still cancel later salvos.
+export const STAGE2_ENEMY_HP = { escort: 80, tank: 150 };
+
 // Time, formation, attack sequence. Each encounter has a different job in the route:
 // lure aimed shots, cross the field, thread rows, then reposition for the next wave.
 export const ENCOUNTERS = [[], [

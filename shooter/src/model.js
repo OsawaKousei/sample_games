@@ -1,7 +1,7 @@
 import { emit, queueAttack, updateBarrage } from './patterns.js';
 import { updateStage3Route, updateStage3Boss } from './stage3.js';
 import { updateLasers, laserHits } from './lasers.js';
-import { WAVE_DURATIONS, ENCOUNTERS, BOSS_SCORES, BOSS_PHASE_HP } from './choreography.js';
+import { WAVE_DURATIONS, ENCOUNTERS, BOSS_SCORES, BOSS_PHASE_HP, STAGE2_ENEMY_HP } from './choreography.js';
 export { WAVE_DURATIONS } from './choreography.js';
 export const WIDTH = 480, HEIGHT = 720, WAVE_SECONDS = 25;
 export const MOVE_SPEED = 360, FOCUS_SPEED = 90, PLAYER_RADIUS = 3;
@@ -107,7 +107,7 @@ function spawnEncounter(s, entry, encounterIndex) {
   positions.forEach((x, i) => {
     const tank = positions.length === 1;
     s.enemies.push({ id: ++s.id, x, baseX: x, y: -45, age: 0, kind: tank ? 'tank' : i % 2 ? 'fighter' : 'runner',
-      hp: (tank ? 26 : 16) + s.stage * 6, radius: tank ? 23 : 16,
+      hp: tank ? STAGE2_ENEMY_HP.tank : STAGE2_ENEMY_HP.escort, radius: tank ? 23 : 16,
       seed: encounterIndex * 3 + i, targetY: 90 + i * 28, attacks, attackIndex: 0,
       variant: encounterIndex + i, hard: s.stage === 2, hold: 4.6 + attacks.length * .8 });
   });

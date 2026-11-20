@@ -148,6 +148,31 @@ test('narrow moving curtains have a survivable learned route in every gate posit
   }
 });
 
+test('stage 2 formations fire their patterns at full power while focused fire still removes enemies', () => {
+  for (const policy of ['left', 'center', 'right', 'sweep']) {
+    const s = createCheckpoint({ stage: 1 }, () => .5);
+    s.status = 'playing'; s.player.invincible = 999;
+    s.player.x = { left: 80, center: 240, right: 400, sweep: 240 }[policy];
+    const firingEnemies = new Set(), patterns = new Set();
+    let peak = 0;
+    // Suppress player death only, so each trajectory sees the full route.
+    // Track due salvos with a live owner, not warnings that die before firing.
+    for (let frame = 0; frame < 47.9 * 60; frame++) {
+      for (const salvo of s.salvos) {
+        if (salvo.at <= s.totalTime + 1 / 60 + 1e-8 && s.enemies.some(e => e.id === salvo.ownerId && e.hp > 0)) {
+          firingEnemies.add(salvo.ownerId); patterns.add(salvo.pattern);
+        }
+      }
+      tick(s, 1 / 60, policy === 'sweep' ? { target: { x: 240 + 180 * Math.sin(s.totalTime * .65), y: 620 } } : {});
+      peak = Math.max(peak, s.bullets.length);
+    }
+    assert.ok(firingEnemies.size >= 12, `${policy}: most formations must survive their first warning`);
+    assert.equal(patterns.size, 8, `${policy}: all authored attack types must reach the field`);
+    assert.ok(peak >= 250, `${policy}: actual bullets must remain on screen`);
+    assert.ok(s.kills >= 8, `${policy}: full-power shooting must still defeat most enemies`);
+  }
+});
+
 test('standing still or blindly sweeping no longer clears the later stages at full power', () => {
   for (const stage of [1, 2]) for (const sweep of [false, true]) {
     const s = createGame(() => .5); s.status = 'playing'; s.stage = stage; s.player.power = 3;
