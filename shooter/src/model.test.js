@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGame, createCheckpoint, tick, bomb, snapshot, WAVE_DURATIONS, WIDTH, HEIGHT, MOVE_SPEED, FOCUS_SPEED } from './model.js';
 import { queueAttack } from './patterns.js';
+import { replayRoute } from '../tools/replays.mjs';
 import { BOSS_PHASE_HP } from './choreography.js';
 import { DEBUG_ENTRIES, parseDebugPath } from './debug.js';
 import { addLaser, laserActive, laserHits } from './lasers.js';
@@ -154,7 +155,7 @@ test('standing still or blindly sweeping no longer clears the later stages at fu
       tick(s, .02, sweep ? { target: { x: 240 + 200 * Math.sin(s.totalTime * .65), y: 620 } } : {});
     }
     assert.equal(s.status, 'lost');
-    assert.ok(s.totalTime < WAVE_DURATIONS[stage]);
+    if (stage === 1) assert.ok(s.totalTime < WAVE_DURATIONS[stage]);
   }
 });
 
@@ -163,7 +164,7 @@ test('phase changes and attack-cycle wraps never teleport or pause the boss', ()
   for (const stage of [1, 2]) {
     const s = createCheckpoint({ stage, bossPhase: 1 }, () => .5);
     s.status = 'playing'; s.autoFire = false; s.player.invincible = 999;
-    const maxStep = (stage === 2 ? 135 : 100) * .48 * .02 + .0001;
+    const maxStep = (stage === 2 ? 90 : 100 * .48) * .02 + .0001;
     for (let phase = 1; phase < BOSS_PHASE_HP[stage].length; phase++) {
       advance(s, 3.2);
       const before = { x: s.boss.x, y: s.boss.y };
@@ -225,21 +226,25 @@ test('laser warnings and fades are harmless; the active finite beam catches a cr
   s.status = 'playing'; bomb(s); assert.equal(s.lasers.length, 0);
 });
 
-test('stage 3 is shorter and combines new dense fronts, aimed bursts and timed laser compartments', () => {
-  assert.equal(WAVE_DURATIONS[2], 30);
+test('stage 3 retains only the opening fronts and enters the boss cleanly at eight seconds', () => {
+  assert.equal(WAVE_DURATIONS[2], 8);
   const states = [createCheckpoint({ stage: 2 }, () => .1), createCheckpoint({ stage: 2 }, () => .9)];
   for (const s of states) { s.status = 'playing'; s.autoFire = false; s.player.invincible = 999; }
-  let peak = 0, overlap = false;
-  for (let frame = 0; frame < 1499; frame++) {
+  let peak = 0;
+  for (let frame = 0; frame < 399; frame++) {
     for (const s of states) tick(s, .02);
     peak = Math.max(peak, states[0].bullets.length);
-    overlap ||= states[0].lasers.some(laserActive) && states[0].bullets.some(b => b.color === 0xffd88c);
+    assert.equal(states[0].lasers.length, 0);
+    assert.ok(states[0].enemies.every(e => e.routeRole === 'front'));
+    assert.equal(states[0].boss, null);
   }
-  assert.ok(peak > 350); assert.ok(peak < 1800); assert.equal(overlap, true);
+  assert.ok(peak > 350); assert.ok(peak < 1800);
   assert.deepEqual(states[0].bullets, states[1].bullets);
-  assert.deepEqual(states[0].lasers, states[1].lasers);
-  advance(states[0], .1); assert.ok(states[0].boss);
-  assert.equal(states[0].lasers.length, 0, 'the stage ends with a clean boss entrance');
+  advance(states[0], .04);
+  assert.ok(states[0].boss);
+  assert.equal(states[0].boss.phase, 1);
+  assert.equal(states[0].enemies.length + states[0].bullets.length + states[0].lasers.length, 0);
+  assert.deepEqual(Object.keys(states[0].routeClock).sort(), ['front', 'frontSpawn']);
 });
 
 test('stage 3 boss homages use ordinary round bullets with different spatial demands', () => {
@@ -286,38 +291,62 @@ test('optimized collision agrees with a swept-circle reference for fast and movi
   }
 });
 
-test('laser partitions overlap locked aimed beams and leave a learned escape route', () => {
-  const s = createCheckpoint({ stage: 2 }, () => .5);
-  s.status = 'playing'; s.autoFire = false; s.time = 8.2; s.player.x = 264;
-  const centers = [264, 232, 216, 248, 264, 232];
-  let overlap = false, volleys = 0, lastId = 0;
-  const locked = new Map();
-  for (let frame = 0; frame < 900; frame++) {
-    const beat = Math.max(0, Math.min(5, Math.floor((s.time - 8.2 + 1e-8) / 2.4)));
-    const local = s.time - 8.2 - beat * 2.4;
-    // Bait near the center, sidestep the aimed pair, then use the short release
-    // to enter the next compartment. Test beams alone so failures locate traps.
-    const x = local < .25 && beat > 0 ? centers[beat - 1] - 18 : centers[beat] - (local >= 1.3 ? 18 : 0);
-    const oldX = s.player.x, oldY = s.player.y;
-    s.bullets = [];
-    tick(s, 1 / 60, { target: { x, y: 620 }, focus: true });
-    const active = s.lasers.filter(laserActive);
-    overlap ||= active.some(l => l.x1 === l.x2) && active.some(l => l.x1 !== l.x2);
-    assert.ok(!s.lasers.some(l => laserHits(l, oldX, oldY, s.player.x, s.player.y)), 'the learned route must avoid every beam');
-    for (const l of s.lasers) {
-      if (l.x1 === l.x2) {
-        if (l.id > lastId) { volleys++; lastId = l.id; }
-      } else {
-        const geometry = [l.x1, l.y1, l.x2, l.y2];
-        if (locked.has(l.id)) assert.deepEqual(geometry, locked.get(l.id), 'aim must not track after warning');
-        else locked.set(l.id, geometry);
-      }
+test('phase 2 escapes expanding rings and sheds re-aimed rounds with held square movement', () => {
+  for (const timingOffsetMs of [-100, 0, 100]) for (const [dx, dy] of [[0, 0], [-4, 0], [4, 0], [0, -4], [0, 4]]) {
+    const r = replayRoute({ bossPhase: 2, timingOffsetMs, dx, dy });
+    assert.equal(r.survived, true, JSON.stringify(r));
+    assert.equal(r.observedSeconds, 40);
+    assert.ok(r.minimumHoldMs >= 400 - 1e-8);
+  }
+});
+
+test('phase 2 re-aims at the current ship while blue rounds continue expanding', () => {
+  const s = createCheckpoint({ stage: 2, bossPhase: 2 }, () => .5);
+  s.status = 'playing'; s.autoFire = false;
+  advance(s, .7);
+  assert.equal(s.bullets.filter(b => b.retargetAt).length, 66);
+  assert.equal(s.bullets.filter(b => !b.retargetAt).length, 22);
+  s.player.x = 400; s.player.y = 320;
+  const blue = s.bullets.find(b => !b.retargetAt);
+  const velocity = [blue.vx, blue.vy];
+  let checked = false;
+  while (!checked) {
+    const red = s.bullets.find(b => b.retargetAt && !b.retargeted);
+    assert.ok(red);
+    const x = red.x, y = red.y;
+    tick(s, 1 / 60);
+    if (red.retargeted) {
+      assert.ok(Math.abs(Math.atan2(red.vy, red.vx) - Math.atan2(s.player.y - y, s.player.x - x)) < 1e-8);
+      assert.deepEqual([blue.vx, blue.vy], velocity);
+      checked = true;
     }
   }
-  assert.equal(overlap, true); assert.ok(volleys >= 36); assert.equal(locked.size, 12);
-  // A player who camps in a compartment must now be caught by the aimed beams.
-  const camper = createCheckpoint({ stage: 2 }, () => .5);
-  camper.status = 'playing'; camper.autoFire = false; camper.time = 8.2; camper.player.x = 264;
-  while (camper.time < 11) { camper.bullets = []; tick(camper, 1 / 60); }
-  assert.ok(camper.player.hp < 5);
+});
+
+test('phase 3 corner blooms have a five-cycle route with 500ms commands and timing/position tolerance', () => {
+  const stationary = createCheckpoint({ stage: 2, bossPhase: 3 }, () => .5);
+  stationary.status = 'playing'; stationary.autoFire = false;
+  for (let i = 0; i < 240; i++) tick(stationary, 1 / 60);
+  assert.ok(stationary.player.hp < 5, 'the central lane must require movement');
+  for (const timingOffsetMs of [-100, 0, 100]) for (const [dx, dy] of [[0, 0], [-4, 0], [4, 0], [0, -4], [0, 4]]) {
+    const r = replayRoute({ bossPhase: 3, timingOffsetMs, dx, dy });
+    assert.equal(r.survived, true, JSON.stringify(r));
+    assert.equal(r.observedSeconds, 32);
+    assert.ok(r.minimumHoldMs >= 500 - 1e-8);
+  }
+});
+
+test('phase 3 forms four stationary clusters, then releases them in a rotating order', () => {
+  const s = createCheckpoint({ stage: 2, bossPhase: 3 }, () => .5);
+  s.status = 'playing'; s.autoFire = false;
+  advance(s, .6);
+  assert.equal(s.bullets.length, 576);
+  assert.equal(s.cues.length, 4);
+  const gold = s.bullets.find(b => b.color === 0xffd88c);
+  const violet = s.bullets.find(b => b.color === 0xd6acff);
+  const initialGold = { x: gold.x, y: gold.y }, initialViolet = { x: violet.x, y: violet.y };
+  advance(s, .7);
+  assert.ok(Math.hypot(gold.x - initialGold.x, gold.y - initialGold.y) > 10);
+  assert.deepEqual({ x: violet.x, y: violet.y }, initialViolet);
+  assert.equal(s.boss.attackClock.winder, undefined);
 });

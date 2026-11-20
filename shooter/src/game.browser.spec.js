@@ -127,9 +127,11 @@ test('Starfall: dense authored encounters and all final boss phases render witho
   await page.goto('http://127.0.0.1:3101');
   await expect(page.locator('.phaser-host canvas')).toBeVisible();
   const fixtures = [
-    { stage: 1, seconds: 9 }, { stage: 2, seconds: 6 }, { stage: 2, seconds: 10 }, { stage: 2, seconds: 10.3 },
+    { stage: 1, seconds: 9 }, { stage: 2, seconds: 6 },
+    { stage: 2, phase: 2, seconds: .55, label: '2-warning' },
     { stage: 2, phase: 1, seconds: 4 }, { stage: 2, phase: 2, seconds: 12 },
-    { stage: 2, phase: 3, seconds: 14 }, { stage: 2, phase: 4, seconds: 18 },
+    { stage: 2, phase: 3, seconds: .6, label: '3-clusters' },
+    { stage: 2, phase: 3, seconds: 2.5 }, { stage: 2, phase: 4, seconds: 18 },
   ];
   for (const fixture of fixtures) {
     const count = await page.evaluate(async fixture => {
@@ -144,12 +146,13 @@ test('Starfall: dense authored encounters and all final boss phases render witho
       }
       for (let i = 0; i < fixture.seconds * 60; i++) tick(s, 1 / 60);
       window.__shooterQA.load(s);
-      return s.bullets.length;
+      return { bullets: s.bullets.length, lasers: s.lasers.length };
     }, fixture);
-    expect(count).toBeGreaterThan(70);
+    expect(count.bullets).toBeGreaterThan(70);
+    expect(count.lasers).toBe(0);
     await expect(page.locator('.viewport-label h2')).toHaveText(`STAGE ${fixture.stage + 1}`);
     if (fixture.phase) await expect(page.locator('.boss-hud')).toContainText(`PHASE ${fixture.phase} / 4`);
-    await page.screenshot({ path: `test-results/shooter-barrage-${fixture.stage + 1}-${fixture.phase || `wave-${fixture.seconds}`}.png` });
+    await page.screenshot({ path: `test-results/shooter-barrage-${fixture.stage + 1}-${fixture.label || fixture.phase || `wave-${fixture.seconds}`}.png` });
     await expectFits(page);
   }
   expect(errors).toEqual([]);

@@ -1,5 +1,4 @@
 import { emit } from './patterns.js';
-import { addLaser } from './lasers.js';
 const TAU = Math.PI * 2;
 const PINK = 0xff96ba, BLUE = 0x91e9ff, VIOLET = 0xd6acff, GOLD = 0xffd88c;
 
@@ -9,10 +8,6 @@ function circle(s, x, y, count, rotation, speed, color, options = {}) {
     const angle = rotation + i * TAU / count;
     emit(s, x + Math.cos(angle) * radius, y + Math.sin(angle) * radius, angle, speed, { color, ...options });
   }
-}
-function aim(s, x, y, count, speed, spread = .055) {
-  const angle = Math.atan2(s.player.y - y, s.player.x - x);
-  for (let i = 0; i < count; i++) emit(s, x, y, angle + (i - (count - 1) / 2) * spread, speed, { color: GOLD });
 }
 function pulse(s, clock, key, time, start, interval, action) {
   clock[key] ??= 0;
@@ -34,59 +29,13 @@ function wavefront(s, beat, sources) {
     emit(s, x, y, Math.atan2(182, vx), Math.hypot(vx, 182), { color: beat % 2 ? BLUE : PINK });
   }
 }
-function sideComb(s, beat) {
-  const left = beat % 2 === 0, opening = 490 + 80 * Math.sin(beat * .65);
-  for (let y = 220; y <= 700; y += 14) {
-    if (Math.abs(y - opening) < 30) continue;
-    emit(s, left ? -10 : 490, y, left ? 0 : Math.PI, 155 + beat % 3 * 8, { color: left ? VIOLET : GOLD });
-  }
-}
 export function updateStage3Route(s) {
   const c = s.routeClock, t = s.time;
   pulse(s, c, 'frontSpawn', t, .25, 1000, () => {
     spawnEmitter(s, 'front', 80, 0, 7.8, 50); spawnEmitter(s, 'front', 400, 1, 7.8, 50);
   });
   const live = role => s.enemies.filter(e => e.routeRole === role && e.hp > 0);
-  if (t < 8) pulse(s, c, 'front', t, 1.3, .27, beat => wavefront(s, beat, live('front')));
-  if (t >= 8 && t < 22) {
-    pulse(s, c, 'aimSpawn', t, 8, 6.5, beat => {
-      spawnEmitter(s, 'aim', 50, beat * 2 + 2, 7, 34); spawnEmitter(s, 'aim', 430, beat * 2 + 3, 7, 34);
-    });
-    pulse(s, c, 'laser', t, 8.2, 2.4, beat => {
-      const offset = [0, 32, 16, 48][beat % 4];
-      for (let x = 40 + offset; x < 470; x += 64) {
-        addLaser(s, x, 24, x, 730, { color: beat % 2 ? PINK : BLUE, width: 12, warning: .7, duration: 1.7 });
-      }
-    });
-    pulse(s, c, 'aimLaser', t, 9.35, 2.4, beat => {
-      // Lock the old position during the vertical partition. Bait both beams
-      // toward an edge of the compartment, then sidestep before they fire.
-      for (const x of [40, 440]) {
-        const angle = Math.atan2(s.player.y - 110, s.player.x - x);
-        addLaser(s, x, 110, x + Math.cos(angle) * 1000, 110 + Math.sin(angle) * 1000,
-          { color: beat % 2 ? GOLD : VIOLET, width: 10, warning: .8, duration: .65 });
-      }
-    });
-    pulse(s, c, 'aim', t, 8.5, .28, beat => {
-      // Each burst locks a fresh position. Stream within a compartment, then
-      // reverse across the former laser line during the scheduled release.
-      const sources = live('aim');
-      const source = sources[beat % Math.max(1, sources.length)];
-      if (source && source.y >= 60) aim(s, source.x, source.y + 20, 7, 275, .04);
-    });
-  }
-  if (t >= 22 && t < 30) {
-    pulse(s, c, 'combSpawn', t, 22, 1000, () => {
-      spawnEmitter(s, 'comb', 45, 8, 8, 46); spawnEmitter(s, 'comb', 435, 9, 8, 46);
-    });
-    pulse(s, c, 'comb', t, 23.2, .38, beat => {
-      if (live('comb').some(e => beat % 2 === 0 ? e.baseX < 240 : e.baseX > 240)) sideComb(s, beat);
-    });
-    pulse(s, c, 'exitAim', t, 23.3, 1.15, beat => {
-      const sources = live('comb'), source = sources[beat % Math.max(1, sources.length)];
-      if (source) aim(s, source.x, source.y + 20, 7, 210);
-    });
-  }
+  if (t < 6) pulse(s, c, 'front', t, 1.3, .27, beat => wavefront(s, beat, live('front')));
 }
 
 // Four ordinary-round-bullet homages. Source notes and adaptations are in
@@ -103,32 +52,42 @@ export function updateStage3Boss(s) {
       circle(s, b.x, b.y + 26, 90, angle, 143 + (row % 2) * 7, row % 2 ? BLUE : PINK);
     });
   } else if (b.phase === 2) {
-    // "Refinement of Earthly Impurity": escape a growing ring around the old
-    // player position before its ordinary bullets turn toward the new position.
-    pulse(s, c, 'cages', t, .5, 2.7, beat => {
-      const x = s.player.x, y = s.player.y, angle = .12 + beat * Math.PI / 8;
-      s.cues.push({ pattern: 'cage', x, y, radius: 100, color: VIOLET, life: .25, maxLife: .25 });
+    // Expand around the ship, then aim at its NEW position. Escape through an
+    // ordinary gap before the turn; quarter-turn movement sheds the pursuit.
+    // Blue rings keep expanding, as in the Lunatic source. No designated exit.
+    pulse(s, c, 'cages', t, .5, 2.4, beat => {
+      const x = s.player.x, y = s.player.y;
+      const angle = -beat * Math.PI / 2;
+      s.cues.push({ pattern: 'cage', x, y, radius: 90, color: PINK, life: .15, maxLife: .15 });
       for (let layer = 0; layer < 3; layer++) {
-        const count = 28 + layer * 8, radius = 84 + layer * 30;
+        const count = 22, radius = 56 + layer * 12;
         for (let i = 0; i < count; i++) {
-          const a = angle + i * TAU / count;
-          emit(s, x + Math.cos(a) * radius, y + Math.sin(a) * radius, a, 32 + layer * 8,
-            { color: layer % 2 ? BLUE : VIOLET, wait: .25,
-              retargetAt: 1.55 + layer * .17, retargetSpeed: 165 + layer * 20 });
+          const a = angle + (i + .5) * TAU / count;
+          emit(s, x + Math.cos(a) * radius, y + Math.sin(a) * radius, a, 30,
+            { color: PINK, wait: .15, lifetime: 4.4, retargetAt: 1.6, retargetSpeed: 180 });
         }
       }
+      for (let layer = 0; layer < 2; layer++) for (let i = 0; i < 11; i++) {
+        const a = angle + (i + .5) * TAU / 11;
+        const radius = 54 + layer * 16;
+        emit(s, x + Math.cos(a) * radius, y + Math.sin(a) * radius, a, 55,
+          { color: BLUE, wait: .15, lifetime: 4.4 });
+      }
     });
-    pulse(s, c, 'cagePressure', t, 1.1, .8, beat => circle(s, b.x, b.y + 26, 36, beat * .13, 130, PINK));
   } else if (b.phase === 3) {
-    // "Oumagatoki": dense four-armed winders change rotation at explicit seams.
-    // Follow the broad opening, then reverse; this is a traversal phase.
-    pulse(s, c, 'winder', t, .35, .12, beat => {
-      const local = beat % 72, direction = local < 36 ? 1 : -1;
-      const sweep = (local < 36 ? local : 71 - local) * .034;
-      if (local === 35 || local === 36) return;
-      for (let arm = 0; arm < 4; arm++) for (let row = -4; row <= 4; row++) {
-        emit(s, b.x, b.y + 28, arm * TAU / 4 + sweep + row * .026 + .3, 155,
-          { color: direction > 0 ? GOLD : VIOLET });
+    // "Modern Divine Spirit World": four corner clusters open in sequence.
+    // Enter the space vacated by the first bloom, then relocate for the next
+    // sequence. Ordinary rounds, fixed ordering; no random collapse or winders.
+    pulse(s, c, 'cornerBloom', t, .5, 6, beat => {
+      const corners = [[60, 650], [60, 190], [420, 190], [420, 650]];
+      for (let corner = 0; corner < 4; corner++) {
+        const [x, y] = corners[corner], order = (corner - beat % 4 + 4) % 4;
+        const wait = .65 + order * .45, color = [GOLD, BLUE, PINK, VIOLET][corner];
+        s.cues.push({ pattern: 'cage', x, y, radius: 64, color, life: wait, maxLife: wait });
+        for (let layer = 0; layer < 3; layer++) {
+          circle(s, x, y, 48, Math.PI / 48 + layer * .012 + beat * .07,
+            150 + layer * 12, color, { startRadius: 30 + layer * 12, wait, lifetime: 5.7 });
+        }
       }
     });
   } else {

@@ -4,7 +4,7 @@ import { updateLasers, laserHits } from './lasers.js';
 import { WAVE_DURATIONS, ENCOUNTERS, BOSS_SCORES, BOSS_PHASE_HP } from './choreography.js';
 export { WAVE_DURATIONS } from './choreography.js';
 export const WIDTH = 480, HEIGHT = 720, WAVE_SECONDS = 25;
-export const MOVE_SPEED = 360, FOCUS_SPEED = 155, PLAYER_RADIUS = 3;
+export const MOVE_SPEED = 360, FOCUS_SPEED = 90, PLAYER_RADIUS = 3;
 export const STAGES = [
   { name: 'STAGE 1', color: '#7ce6e9', rgb: 0x7ce6e9, background: 0x071b2b },
   { name: 'STAGE 2', color: '#ffbe77', rgb: 0xffbe77, background: 0x291b26 },
@@ -132,7 +132,8 @@ function updateBoss(s, dt) {
     }
   } else {
     b.motionTime += dt;
-    b.x = WIDTH / 2 + Math.sin(b.motionTime * .48) * (s.stage === 2 ? 135 : 100);
+    const destinationX = WIDTH / 2 + Math.sin(b.motionTime * .48) * (s.stage === 2 ? 135 : 100);
+    b.x += Math.max(-90 * dt, Math.min(90 * dt, destinationX - b.x));
     if (b.y >= 100) {
       b.phaseTime += dt;
       if (s.stage === 2) updateStage3Boss(s);
@@ -244,11 +245,11 @@ export function tick(s, dt, input = {}) {
     const oldX = b.x, oldY = b.y;
     b.age = (b.age || 0) + dt;
     if (b.age < (b.wait || 0)) {
-      if (!b.dead && b.x > -80 && b.x < WIDTH + 80 && b.y > -140 && b.y < HEIGHT + 60 && b.age < 14) s.bullets[remainingBullets++] = b;
+      if (!b.dead && b.x > -80 && b.x < WIDTH + 80 && b.y > -140 && b.y < HEIGHT + 60 && b.age < (b.lifetime ?? 14)) s.bullets[remainingBullets++] = b;
       continue;
     }
     if (b.retargetAt && !b.retargeted && b.age >= b.retargetAt) {
-      const angle = Math.atan2(p.y - b.y, p.x - b.x);
+      const angle = Math.atan2((b.retargetY ?? p.y) - b.y, (b.retargetX ?? p.x) - b.x);
       b.vx = Math.cos(angle) * b.retargetSpeed; b.vy = Math.sin(angle) * b.retargetSpeed;
       b.retargeted = true;
     }
@@ -258,7 +259,7 @@ export function tick(s, dt, input = {}) {
     }
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (segmentHits(0, 0, oldX - previousX, oldY - previousY, b.x - p.x, b.y - p.y, b.radius + PLAYER_RADIUS)) { damage(s); b.dead = true; }
-    if (!b.dead && b.x > -80 && b.x < WIDTH + 80 && b.y > -140 && b.y < HEIGHT + 60 && b.age < 14) {
+    if (!b.dead && b.x > -80 && b.x < WIDTH + 80 && b.y > -140 && b.y < HEIGHT + 60 && b.age < (b.lifetime ?? 14)) {
       s.bullets[remainingBullets++] = b;
     }
   }
