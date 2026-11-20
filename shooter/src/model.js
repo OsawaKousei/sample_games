@@ -166,10 +166,15 @@ function finishBossPhase(s) {
     clearBarrage(s); s.shots = []; explosion(s, b.x, b.y, STAGES[s.stage].rgb, 40);
   }
 }
-function segmentDistance(px, py, x1, y1, x2, y2) {
+function segmentHits(px, py, x1, y1, x2, y2, radius) {
+  // Most bullets are far from the ship. Reject their swept bounds before
+  // projecting onto the segment; keep fast bullets and moving-player hits exact.
+  if (px < Math.min(x1, x2) - radius || px > Math.max(x1, x2) + radius ||
+      py < Math.min(y1, y2) - radius || py > Math.max(y1, y2) + radius) return false;
   const dx = x2 - x1, dy = y2 - y1;
   const t = clamp(((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy || 1), 0, 1);
-  return Math.hypot(px - x1 - dx * t, py - y1 - dy * t);
+  const ex = px - x1 - dx * t, ey = py - y1 - dy * t;
+  return ex * ex + ey * ey < radius * radius;
 }
 export function tick(s, dt, input = {}) {
   if (!['playing', 'transition'].includes(s.status)) return;
@@ -225,19 +230,23 @@ export function tick(s, dt, input = {}) {
     const oldX = shot.x, oldY = shot.y;
     shot.x += shot.vx * dt; shot.y += shot.vy * dt;
     for (const e of s.enemies) {
-      if (e.hp > 0 && segmentDistance(e.x, e.y, oldX, oldY, shot.x, shot.y) < e.radius + shot.radius) {
+      if (e.hp > 0 && segmentHits(e.x, e.y, oldX, oldY, shot.x, shot.y, e.radius + shot.radius)) {
         e.hp -= shot.damage; shot.dead = true; s.hits++; explosion(s, shot.x, shot.y, 0x9eeeff, 3); break;
       }
     }
-    if (!shot.dead && s.boss && s.boss.y >= 100 && segmentDistance(s.boss.x, s.boss.y, oldX, oldY, shot.x, shot.y) < s.boss.radius + shot.radius) {
+    if (!shot.dead && s.boss && s.boss.y >= 100 && segmentHits(s.boss.x, s.boss.y, oldX, oldY, shot.x, shot.y, s.boss.radius + shot.radius)) {
       hitBoss(s, shot.damage); shot.dead = true; s.hits++; explosion(s, shot.x, shot.y, 0xffd29c, 2);
     }
   }
   s.shots = s.shots.filter(b => !b.dead && b.y > -25 && b.x > -10 && b.x < WIDTH + 10);
+  let remainingBullets = 0;
   for (const b of s.bullets) {
     const oldX = b.x, oldY = b.y;
     b.age = (b.age || 0) + dt;
-    if (b.age < (b.wait || 0)) continue;
+    if (b.age < (b.wait || 0)) {
+      if (!b.dead && b.x > -80 && b.x < WIDTH + 80 && b.y > -140 && b.y < HEIGHT + 60 && b.age < 14) s.bullets[remainingBullets++] = b;
+      continue;
+    }
     if (b.retargetAt && !b.retargeted && b.age >= b.retargetAt) {
       const angle = Math.atan2(p.y - b.y, p.x - b.x);
       b.vx = Math.cos(angle) * b.retargetSpeed; b.vy = Math.sin(angle) * b.retargetSpeed;
@@ -248,10 +257,13 @@ export function tick(s, dt, input = {}) {
       b.vx *= factor; b.vy *= factor;
     }
     b.x += b.vx * dt; b.y += b.vy * dt;
-    if (segmentDistance(0, 0, oldX - previousX, oldY - previousY, b.x - p.x, b.y - p.y) < b.radius + PLAYER_RADIUS) { damage(s); b.dead = true; }
+    if (segmentHits(0, 0, oldX - previousX, oldY - previousY, b.x - p.x, b.y - p.y, b.radius + PLAYER_RADIUS)) { damage(s); b.dead = true; }
+    if (!b.dead && b.x > -80 && b.x < WIDTH + 80 && b.y > -140 && b.y < HEIGHT + 60 && b.age < 14) {
+      s.bullets[remainingBullets++] = b;
+    }
   }
   for (const laser of s.lasers) if (laserHits(laser, previousX, previousY, p.x, p.y, PLAYER_RADIUS)) damage(s);
-  s.bullets = s.bullets.filter(b => !b.dead && b.x > -80 && b.x < WIDTH + 80 && b.y > -140 && b.y < HEIGHT + 60 && b.age < 14);
+  s.bullets.length = remainingBullets;
   for (const e of s.enemies.filter(e => e.hp <= 0)) {
     s.kills++; s.score += e.kind === 'tank' ? 250 : 100; explosion(s, e.x, e.y, STAGES[s.stage].rgb);
     if (s.kills % 5 === 0) s.pickups.push({ id: ++s.id, x: e.x, y: e.y, kind: s.kills % 15 === 0 ? 'health' : 'power' });

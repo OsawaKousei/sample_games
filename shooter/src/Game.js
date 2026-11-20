@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { BulletRenderer } from './BulletRenderer.js';
 import { laserActive } from './lasers.js';
 import { createGame, createCheckpoint, tick, bomb, snapshot, WIDTH, HEIGHT, STAGES } from './model.js';
 export function mountGame(parent,onChange,entry=null){
@@ -13,7 +14,7 @@ export function mountGame(parent,onChange,entry=null){
   };
   class FlightScene extends Phaser.Scene{
     constructor(){super('flight');}
-    create(){sceneRef=this;this.g=this.add.graphics();this.keys=this.input.keyboard.addKeys({up:'W',down:'S',left:'A',right:'D',up2:'UP',down2:'DOWN',left2:'LEFT',right2:'RIGHT',fire:'SPACE',fire2:'Z',focus:'SHIFT'});this.input.keyboard.on('keydown-P',()=>controller.pause());this.input.keyboard.on('keydown-ESC',()=>controller.pause());this.input.keyboard.on('keydown-X',()=>controller.bomb());this.uiTime=0;this.bgTime=0;this.accumulator=0;this.lastStatus=null;this.stars=Array.from({length:95},(_,i)=>({x:(i*137.39)%WIDTH,y:(i*83.74)%HEIGHT,size:i%4===0?1.8:.8,speed:15+i%5*12}));onChange(snapshot(gameState));}
+    create(){sceneRef=this;this.background=this.add.graphics();this.bulletRenderer=new BulletRenderer(this);this.foreground=this.add.graphics();this.g=this.background;this.keys=this.input.keyboard.addKeys({up:'W',down:'S',left:'A',right:'D',up2:'UP',down2:'DOWN',left2:'LEFT',right2:'RIGHT',fire:'SPACE',fire2:'Z',focus:'SHIFT'});this.input.keyboard.on('keydown-P',()=>controller.pause());this.input.keyboard.on('keydown-ESC',()=>controller.pause());this.input.keyboard.on('keydown-X',()=>controller.bomb());this.uiTime=0;this.bgTime=0;this.accumulator=0;this.lastStatus=null;this.stars=Array.from({length:95},(_,i)=>({x:(i*137.39)%WIDTH,y:(i*83.74)%HEIGHT,size:i%4===0?1.8:.8,speed:15+i%5*12}));onChange(snapshot(gameState));}
     update(_, delta) {
       const dt = Math.min(delta / 1000, .05);
       this.bgTime += dt;
@@ -39,7 +40,7 @@ export function mountGame(parent,onChange,entry=null){
 
     polygon(points,color,alpha=1,lineColor){this.g.fillStyle(color,alpha);this.g.fillPoints(points,true);if(lineColor){this.g.lineStyle(1,lineColor,.8);this.g.strokePoints(points,true);}}
     ship(x,y,scale=1,enemy=false,color=0x8ae9ed){const dir=enemy?-1:1;const points=[{x,y:y-22*scale*dir},{x:x+6*scale,y:y-4*scale*dir},{x:x+20*scale,y:y+13*scale*dir},{x:x+7*scale,y:y+9*scale*dir},{x,y:y+17*scale*dir},{x:x-7*scale,y:y+9*scale*dir},{x:x-20*scale,y:y+13*scale*dir},{x:x-6*scale,y:y-4*scale*dir}];this.polygon(points,enemy?0x374358:0xc4e4e8,1,color);this.polygon([{x,y:y-11*scale*dir},{x:x+4*scale,y:y+5*scale*dir},{x:x-4*scale,y:y+5*scale*dir}],color);this.g.fillStyle(enemy?0xff7d7d:0x85edff,.7);this.g.fillTriangle(x-4*scale,y+15*scale*dir,x+4*scale,y+15*scale*dir,x,y+(25+Math.sin(this.bgTime*40)*8)*scale*dir);}
-    draw(s){const g=this.g,stage=STAGES[s.stage],t=this.bgTime;g.clear();g.fillStyle(stage.background);g.fillRect(0,0,WIDTH,HEIGHT);
+    draw(s){this.g=this.background;let g=this.g;const stage=STAGES[s.stage],t=this.bgTime;g.clear();g.fillStyle(stage.background);g.fillRect(0,0,WIDTH,HEIGHT);
       // Parallax dust, orbital arcs and scrolling navigation lanes.
       g.lineStyle(1,stage.rgb,.07);for(let i=0;i<8;i++){const y=(i*120+t*22)%960-120;g.strokeEllipse(240,y,620,220);}for(const x of [45,435])g.lineBetween(x,0,x,HEIGHT);
       for(const star of this.stars){g.fillStyle(stage.rgb,star.size>1?.55:.28);g.fillRect(star.x,(star.y+t*star.speed)%HEIGHT,star.size,star.size+(s.status==='playing'?star.speed*.05:0));}
@@ -93,10 +94,12 @@ export function mountGame(parent,onChange,entry=null){
       for(const shot of s.shots){g.fillStyle(0x86eeff,.12);g.fillRoundedRect(shot.x-5,shot.y-12,10,27,5);g.fillStyle(0xc1fbff);g.fillRoundedRect(shot.x-1.5,shot.y-10,3,19,2);}
       for(const e of s.enemies){if(e.kind==='tank'){this.polygon([{x:e.x-24,y:e.y-15},{x:e.x+24,y:e.y-15},{x:e.x+19,y:e.y+18},{x:e.x,y:e.y+25},{x:e.x-19,y:e.y+18}],0x484655,1,stage.rgb);g.fillStyle(0xffa9a9);g.fillRect(e.x-10,e.y,20,4);}else this.ship(e.x,e.y,e.kind==='runner'?.75:.9,true,s.stage===0?0xffb39c:0xe5a1ea);}
       if(s.boss){const b=s.boss,c=[stage.rgb,0xff96ba,0x91e9ff,0xffd88c][b.phase-1];g.fillStyle(c,.035);g.fillCircle(b.x,b.y,85+Math.sin(t*2)*8);this.polygon([{x:b.x-65,y:b.y-24},{x:b.x-30,y:b.y-45},{x:b.x,y:b.y-26},{x:b.x+30,y:b.y-45},{x:b.x+65,y:b.y-24},{x:b.x+52,y:b.y+30},{x:b.x+23,y:b.y+16},{x:b.x,y:b.y+52},{x:b.x-23,y:b.y+16},{x:b.x-52,y:b.y+30}],b.hit?0xa8a4ae:0x37384f,1,c);g.lineStyle(2,c,.8);g.strokeCircle(b.x,b.y,22);g.fillStyle(c);g.fillCircle(b.x,b.y,9+Math.sin(t*7)*2);for(const dx of [-43,43]){g.fillStyle(c,.9);g.fillRect(b.x+dx-3,b.y+12,6,18);}}
-      for(const b of s.bullets){g.fillStyle(b.color,.16);g.fillCircle(b.x,b.y,b.radius+2);g.fillStyle(b.color,b.age<(b.wait||0)?.3:1);g.fillCircle(b.x,b.y,b.radius);g.fillStyle(0xfff4fa);g.fillCircle(b.x,b.y,1.4);}
+      this.bulletRenderer.draw(s.bullets,WIDTH,HEIGHT);
+      this.g=this.foreground;g=this.g;g.clear();
       const p=s.player;if(s.status!=='lost'&&(p.invincible<=0||Math.floor(t*15)%2===0)){g.fillStyle(0x7ce6e9,.05);g.fillCircle(p.x,p.y,34);this.ship(p.x,p.y,1,false);g.fillStyle(0xffffff);g.fillCircle(p.x,p.y,3);if(this.keys.focus.isDown){g.lineStyle(1,0xb9f8ff,.6);g.strokeCircle(p.x,p.y,12);}if(p.invincible>0){g.lineStyle(1,0x9cefff,.6);g.strokeCircle(p.x,p.y,28);}}
       for(const pt of s.particles){g.fillStyle(pt.color,Math.max(0,pt.life/pt.max));g.fillCircle(pt.x,pt.y,pt.size*(pt.life/pt.max+.3));}
-      if(s.flash>0){g.fillStyle(stage.rgb,Math.min(.5,s.flash*.6));g.fillRect(0,0,WIDTH,HEIGHT);}if(s.shake>0){g.setPosition(Math.sin(t*87)*s.shake*8,Math.cos(t*61)*s.shake*7);}else g.setPosition(0,0);
+      if(s.flash>0){g.fillStyle(stage.rgb,Math.min(.5,s.flash*.6));g.fillRect(0,0,WIDTH,HEIGHT);}const shakeX=Math.sin(t*87)*s.shake*8,shakeY=Math.cos(t*61)*s.shake*7;
+      for(const layer of [this.background,this.bulletRenderer.blitter,this.foreground])layer.setPosition(shakeX,shakeY);
       g.fillStyle(0x000000,.06);for(let y=0;y<HEIGHT;y+=4)g.fillRect(0,y,WIDTH,1);
     }
   }

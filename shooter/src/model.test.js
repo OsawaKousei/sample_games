@@ -267,3 +267,57 @@ test('the final homage escalates by damage as well as time', () => {
   s.boss.hp = 130; tick(s, .02); assert.equal(s.boss.intensity, 3);
   assert.ok(s.boss.attackClock.blue); assert.ok(s.boss.attackClock.gold);
 });
+
+test('optimized collision agrees with a swept-circle reference for fast and moving targets', () => {
+  let seed = 9721;
+  const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32);
+  for (let i = 0; i < 1500; i++) {
+    const s = emptyArena(), oldX = s.player.x, oldY = s.player.y;
+    const b = { x: oldX + (random() - .5) * 160, y: oldY + (random() - .5) * 160,
+      vx: (random() - .5) * 4000, vy: (random() - .5) * 4000, radius: 3.5, age: 0 };
+    const x1 = b.x - oldX, y1 = b.y - oldY;
+    const bx = b.x + b.vx * .05, by = b.y + b.vy * .05;
+    s.bullets.push(b);
+    tick(s, .05, { x: random() * 2 - 1, y: random() * 2 - 1 });
+    const dx = bx - s.player.x - x1, dy = by - s.player.y - y1;
+    const t = Math.max(0, Math.min(1, -(x1 * dx + y1 * dy) / (dx * dx + dy * dy || 1)));
+    const hit = Math.hypot(x1 + t * dx, y1 + t * dy) < 6.5;
+    assert.equal(s.player.hp, hit ? 4 : 5);
+  }
+});
+
+test('laser partitions overlap locked aimed beams and leave a learned escape route', () => {
+  const s = createCheckpoint({ stage: 2 }, () => .5);
+  s.status = 'playing'; s.autoFire = false; s.time = 8.2; s.player.x = 264;
+  const centers = [264, 232, 216, 248, 264, 232];
+  let overlap = false, volleys = 0, lastId = 0;
+  const locked = new Map();
+  for (let frame = 0; frame < 900; frame++) {
+    const beat = Math.max(0, Math.min(5, Math.floor((s.time - 8.2 + 1e-8) / 2.4)));
+    const local = s.time - 8.2 - beat * 2.4;
+    // Bait near the center, sidestep the aimed pair, then use the short release
+    // to enter the next compartment. Test beams alone so failures locate traps.
+    const x = local < .25 && beat > 0 ? centers[beat - 1] - 18 : centers[beat] - (local >= 1.3 ? 18 : 0);
+    const oldX = s.player.x, oldY = s.player.y;
+    s.bullets = [];
+    tick(s, 1 / 60, { target: { x, y: 620 }, focus: true });
+    const active = s.lasers.filter(laserActive);
+    overlap ||= active.some(l => l.x1 === l.x2) && active.some(l => l.x1 !== l.x2);
+    assert.ok(!s.lasers.some(l => laserHits(l, oldX, oldY, s.player.x, s.player.y)), 'the learned route must avoid every beam');
+    for (const l of s.lasers) {
+      if (l.x1 === l.x2) {
+        if (l.id > lastId) { volleys++; lastId = l.id; }
+      } else {
+        const geometry = [l.x1, l.y1, l.x2, l.y2];
+        if (locked.has(l.id)) assert.deepEqual(geometry, locked.get(l.id), 'aim must not track after warning');
+        else locked.set(l.id, geometry);
+      }
+    }
+  }
+  assert.equal(overlap, true); assert.ok(volleys >= 36); assert.equal(locked.size, 12);
+  // A player who camps in a compartment must now be caught by the aimed beams.
+  const camper = createCheckpoint({ stage: 2 }, () => .5);
+  camper.status = 'playing'; camper.autoFire = false; camper.time = 8.2; camper.player.x = 264;
+  while (camper.time < 11) { camper.bullets = []; tick(camper, 1 / 60); }
+  assert.ok(camper.player.hp < 5);
+});

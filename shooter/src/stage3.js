@@ -52,16 +52,27 @@ export function updateStage3Route(s) {
     pulse(s, c, 'aimSpawn', t, 8, 6.5, beat => {
       spawnEmitter(s, 'aim', 50, beat * 2 + 2, 7, 34); spawnEmitter(s, 'aim', 430, beat * 2 + 3, 7, 34);
     });
-    pulse(s, c, 'laser', t, 8.2, 3.5, beat => {
-      const columns = [[96, 240, 384], [60, 168, 312, 420], [120, 240, 360], [78, 204, 330]][beat % 4];
-      for (const x of columns) addLaser(s, x, 24, x, 730, { color: beat % 2 ? PINK : BLUE });
+    pulse(s, c, 'laser', t, 8.2, 2.4, beat => {
+      const offset = [0, 32, 16, 48][beat % 4];
+      for (let x = 40 + offset; x < 470; x += 64) {
+        addLaser(s, x, 24, x, 730, { color: beat % 2 ? PINK : BLUE, width: 12, warning: .7, duration: 1.7 });
+      }
     });
-    pulse(s, c, 'aim', t, 8.5, .42, beat => {
+    pulse(s, c, 'aimLaser', t, 9.35, 2.4, beat => {
+      // Lock the old position during the vertical partition. Bait both beams
+      // toward an edge of the compartment, then sidestep before they fire.
+      for (const x of [40, 440]) {
+        const angle = Math.atan2(s.player.y - 110, s.player.x - x);
+        addLaser(s, x, 110, x + Math.cos(angle) * 1000, 110 + Math.sin(angle) * 1000,
+          { color: beat % 2 ? GOLD : VIOLET, width: 10, warning: .8, duration: .65 });
+      }
+    });
+    pulse(s, c, 'aim', t, 8.5, .28, beat => {
       // Each burst locks a fresh position. Stream within a compartment, then
       // reverse across the former laser line during the scheduled release.
       const sources = live('aim');
       const source = sources[beat % Math.max(1, sources.length)];
-      if (source && source.y >= 60) aim(s, source.x, source.y + 20, 5, 245, .045);
+      if (source && source.y >= 60) aim(s, source.x, source.y + 20, 7, 275, .04);
     });
   }
   if (t >= 22 && t < 30) {

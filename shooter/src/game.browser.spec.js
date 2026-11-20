@@ -127,7 +127,7 @@ test('Starfall: dense authored encounters and all final boss phases render witho
   await page.goto('http://127.0.0.1:3101');
   await expect(page.locator('.phaser-host canvas')).toBeVisible();
   const fixtures = [
-    { stage: 1, seconds: 9 }, { stage: 2, seconds: 6 }, { stage: 2, seconds: 10 },
+    { stage: 1, seconds: 9 }, { stage: 2, seconds: 6 }, { stage: 2, seconds: 10 }, { stage: 2, seconds: 10.3 },
     { stage: 2, phase: 1, seconds: 4 }, { stage: 2, phase: 2, seconds: 12 },
     { stage: 2, phase: 3, seconds: 14 }, { stage: 2, phase: 4, seconds: 18 },
   ];
@@ -184,5 +184,54 @@ test('Starfall: every debug URL starts and retries its selected checkpoint at fu
   }
   await page.goto('http://127.0.0.1:3101/debug/boss/3/phase/9');
   await expect(page.getByRole('alert')).toHaveText('開始位置が見つかりません。');
+  expect(errors).toEqual([]);
+});
+
+test('Starfall: batched rounds preserve styles, cull offscreen and reuse cleared slots in WebGL and Canvas', async ({ page }) => {
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  let canvas = false;
+  await page.route('**/src/Game.js', async route => {
+    const response = await route.fetch();
+    let body = (await response.text()).replace('create(){sceneRef=this;',
+      'create(){sceneRef=this;window.__batchQA={scene:this,load(s){gameState=s;}};');
+    if (canvas) body = body.replace('type:Phaser.AUTO', 'type:Phaser.CANVAS');
+    await route.fulfill({ response, body });
+  });
+  for (canvas of [false, true]) {
+    await page.goto('http://127.0.0.1:3101');
+    await expect(page.locator('.phaser-host canvas')).toBeVisible();
+    const result = await page.evaluate(async () => {
+      const { createGame } = await import('/src/model.js');
+      const { DANMAKU_COLORS } = await import('/src/patterns.js');
+      const s = createGame(), scene = window.__batchQA.scene;
+      s.status = 'paused'; s.shake = .2;
+      const colors = [...DANMAKU_COLORS, 0xff8c95, 0xffba72];
+      s.bullets = Array.from({ length: 2000 }, (_, i) => ({
+        x: 20 + i % 40 * 11, y: 40 + Math.floor(i / 40) * 12,
+        radius: i % 2 ? 4 : 3.5, color: colors[i % colors.length], age: 0, wait: i % 3 ? 0 : .5,
+      }));
+      window.__batchQA.load(s); scene.draw(s);
+      const renderer = scene.bulletRenderer, original = [...renderer.pool];
+      const initial = renderer.blitter.getRenderList().length;
+      const stylesMatch = s.bullets.every((b, i) => {
+        const frame = renderer.frames.get(b.color).get(b.radius)[b.wait ? 1 : 0];
+        return renderer.pool[i].frame === frame && renderer.pool[i].x === b.x - 8 && renderer.pool[i].y === b.y - 8;
+      });
+      const layersAligned = [scene.background, scene.foreground].every(g => g.x === renderer.blitter.x && g.y === renderer.blitter.y);
+      const rounds = s.bullets;
+      s.bullets = []; scene.draw(s);
+      const cleared = renderer.blitter.getRenderList().length;
+      s.bullets = rounds; rounds[0].x = -40; scene.draw(s);
+      const culled = renderer.blitter.getRenderList().length;
+      rounds[0].x = 20; rounds[0].age = 1; scene.draw(s);
+      return { initial, cleared, culled, stylesMatch, layersAligned,
+        restored: renderer.blitter.getRenderList().length,
+        reused: original.every((bob, i) => bob === renderer.pool[i]),
+        activated: renderer.pool[0].frame === renderer.frames.get(rounds[0].color).get(rounds[0].radius)[0] };
+    });
+    expect(result).toEqual({ initial: 2000, cleared: 0, culled: 1999, restored: 2000,
+      stylesMatch: true, layersAligned: true, reused: true, activated: true });
+    await page.screenshot({ path: `test-results/shooter-bullet-batch-${canvas ? 'canvas' : 'webgl'}.png` });
+  }
   expect(errors).toEqual([]);
 });
