@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGame, tick, bomb, snapshot, WAVE_DURATIONS, WIDTH, HEIGHT, MOVE_SPEED, FOCUS_SPEED } from './model.js';
+import { createGame, createCheckpoint, tick, bomb, snapshot, WAVE_DURATIONS, WIDTH, HEIGHT, MOVE_SPEED, FOCUS_SPEED } from './model.js';
 import { queueAttack } from './patterns.js';
 import { BOSS_PHASE_HP } from './choreography.js';
+import { DEBUG_ENTRIES, parseDebugPath } from './debug.js';
+import { addLaser, laserActive, laserHits } from './lasers.js';
 const advance = (s, seconds, input = {}) => { for (let i = 0; i < Math.ceil(seconds / .02); i++) tick(s, .02, input); };
 const emptyArena = (stage = 0) => {
   const s = createGame(() => .5); s.status = 'playing'; s.stage = stage; s.autoFire = false;
@@ -62,9 +64,9 @@ test('bosses arrive at each authored stage duration and all phases lead to victo
     else for (let phase = 1; phase < BOSS_PHASE_HP[stage].length; phase++) {
       s.boss.hp = BOSS_PHASE_HP[stage].slice(phase).reduce((a, b) => a + b, 0);
       tick(s, .02); assert.equal(s.boss.phase, phase + 1);
-      assert.ok(s.boss.breakTime > 0);
+      assert.equal('breakTime' in s.boss, false);
       assert.equal(s.bullets.length + s.salvos.length + s.cues.length, 0);
-      advance(s, 1.12);
+      advance(s, .02);
     }
     s.boss.hp = 0; tick(s, .02);
     assert.equal(s.status, stage < 2 ? 'transition' : 'won');
@@ -78,7 +80,7 @@ test('bombs cannot skip a boss phase; the next phase starts with a clean field',
   s.boss.hp = floor + 10;
   bomb(s); assert.equal(s.boss.hp, floor);
   tick(s, .02); assert.equal(s.boss.phase, 2);
-  const hp = s.boss.hp; bomb(s); assert.equal(s.boss.hp, hp);
+  const hp = s.boss.hp; bomb(s); assert.equal(s.boss.hp, hp - 70);
   advance(s, 1.2); assert.equal(s.boss.phase, 2);
   assert.equal(snapshot(s).boss.phaseCount, 4);
 });
@@ -97,7 +99,7 @@ test('warning locks aimed burst before firing, and destroying its source cancels
 });
 
 test('scripted encounters are reproducible despite cosmetic randomness and use distinct attacks', () => {
-  for (const stage of [1, 2]) {
+  for (const stage of [1]) {
     const states = [createGame(() => .1), createGame(() => .9)], seen = new Set();
     for (const s of states) { s.status = 'playing'; s.stage = stage; s.autoFire = false; s.player.invincible = 999; }
     let peak = 0;
@@ -115,7 +117,7 @@ test('scripted encounters are reproducible despite cosmetic randomness and use d
 });
 
 test('every boss phase changes choreography, including the reprise', () => {
-  for (const stage of [1, 2]) for (let phase = 1; phase <= BOSS_PHASE_HP[stage].length; phase++) {
+  for (const stage of [1]) for (let phase = 1; phase <= BOSS_PHASE_HP[stage].length; phase++) {
     const s = bossArena(stage); s.player.invincible = 999; s.boss.phase = phase;
     s.boss.hp = BOSS_PHASE_HP[stage].slice(phase - 1).reduce((a, b) => a + b, 0);
     const seen = new Set(), openings = [];
@@ -154,4 +156,114 @@ test('standing still or blindly sweeping no longer clears the later stages at fu
     assert.equal(s.status, 'lost');
     assert.ok(s.totalTime < WAVE_DURATIONS[stage]);
   }
+});
+
+
+test('phase changes and attack-cycle wraps never teleport or pause the boss', () => {
+  for (const stage of [1, 2]) {
+    const s = createCheckpoint({ stage, bossPhase: 1 }, () => .5);
+    s.status = 'playing'; s.autoFire = false; s.player.invincible = 999;
+    const maxStep = (stage === 2 ? 135 : 100) * .48 * .02 + .0001;
+    for (let phase = 1; phase < BOSS_PHASE_HP[stage].length; phase++) {
+      advance(s, 3.2);
+      const before = { x: s.boss.x, y: s.boss.y };
+      s.boss.hp = BOSS_PHASE_HP[stage].slice(phase).reduce((a, b) => a + b, 0);
+      tick(s, .02);
+      assert.equal(s.boss.phase, phase + 1);
+      assert.ok(Math.abs(s.boss.x - before.x) <= maxStep);
+      assert.equal(s.boss.y, before.y);
+      assert.equal(s.lasers.length + s.salvos.length + s.cues.length + s.bullets.length, 0);
+      const clock = s.boss.phaseTime;
+      for (let frame = 0; frame < 1000; frame++) {
+        const x = s.boss.x; tick(s, .02);
+        assert.ok(Math.abs(s.boss.x - x) <= maxStep, 'movement must stay continuous across the reprise');
+      }
+      assert.ok(s.boss.phaseTime > clock);
+      assert.ok(s.bullets.length + s.salvos.length > 0, 'the next phase starts without a preparation pause');
+    }
+  }
+});
+
+test('all debug paths initialize full resources, clean fields, and the exact selected phase', () => {
+  assert.equal(DEBUG_ENTRIES.length, 12);
+  for (const entry of DEBUG_ENTRIES) {
+    const parsed = parseDebugPath(entry.path);
+    assert.equal(parsed.stage, entry.stage); assert.equal(parsed.bossPhase, entry.bossPhase);
+    const s = createCheckpoint(parsed, () => .5);
+    assert.equal(s.status, 'ready'); assert.equal(s.player.hp, 5);
+    assert.equal(s.player.power, 3); assert.equal(s.bombs, 3); assert.equal(s.score, 0);
+    assert.equal(s.player.invincible, 0); assert.equal(s.debug, true);
+    assert.equal(s.bullets.length + s.lasers.length + s.salvos.length + s.cues.length + s.enemies.length, 0);
+    if (entry.bossPhase) {
+      assert.equal(s.boss.phase, entry.bossPhase); assert.equal(s.boss.phaseTime, 0);
+      assert.equal(s.boss.hp, BOSS_PHASE_HP[entry.stage].slice(entry.bossPhase - 1).reduce((a, b) => a + b, 0));
+      assert.equal(s.boss.y, 125);
+    } else { assert.equal(s.boss, null); assert.equal(s.time, 0); }
+    const before = snapshot(s); tick(s, .05); assert.deepEqual(snapshot(s), before);
+  }
+  assert.equal(parseDebugPath('/'), null);
+  assert.deepEqual(parseDebugPath('/debug'), { index: true, invalid: false });
+  assert.deepEqual(parseDebugPath('/debug/boss/1/phase/9'), { index: true, invalid: true });
+  for (const bad of [{ stage: 3 }, { stage: -1 }, { stage: 0, bossPhase: 3 }, { stage: 2, bossPhase: 0 }]) {
+    assert.throws(() => createCheckpoint(bad), RangeError);
+  }
+});
+
+test('laser warnings and fades are harmless; the active finite beam catches a crossing player', () => {
+  const s = emptyArena(2); addLaser(s, 240, 100, 240, 650);
+  const laser = s.lasers[0];
+  assert.equal(laserActive(laser), false);
+  assert.equal(laserHits(laser, 230, 620, 250, 620), false);
+  laser.age = laser.warning;
+  assert.equal(laserHits(laser, 230, 620, 250, 620), true);
+  assert.equal(laserHits(laser, 240, 680, 240, 680), false, 'finite endpoints must match the drawing');
+  laser.age = laser.warning + laser.duration;
+  assert.equal(laserHits(laser, 240, 620, 240, 620), false);
+  laser.age = 1; s.player.x = 240;
+  tick(s, .02); assert.equal(s.player.hp, 4);
+  s.status = 'paused'; const age = laser.age; tick(s, .02); assert.equal(laser.age, age);
+  s.status = 'playing'; bomb(s); assert.equal(s.lasers.length, 0);
+});
+
+test('stage 3 is shorter and combines new dense fronts, aimed bursts and timed laser compartments', () => {
+  assert.equal(WAVE_DURATIONS[2], 30);
+  const states = [createCheckpoint({ stage: 2 }, () => .1), createCheckpoint({ stage: 2 }, () => .9)];
+  for (const s of states) { s.status = 'playing'; s.autoFire = false; s.player.invincible = 999; }
+  let peak = 0, overlap = false;
+  for (let frame = 0; frame < 1499; frame++) {
+    for (const s of states) tick(s, .02);
+    peak = Math.max(peak, states[0].bullets.length);
+    overlap ||= states[0].lasers.some(laserActive) && states[0].bullets.some(b => b.color === 0xffd88c);
+  }
+  assert.ok(peak > 350); assert.ok(peak < 1800); assert.equal(overlap, true);
+  assert.deepEqual(states[0].bullets, states[1].bullets);
+  assert.deepEqual(states[0].lasers, states[1].lasers);
+  advance(states[0], .1); assert.ok(states[0].boss);
+  assert.equal(states[0].lasers.length, 0, 'the stage ends with a clean boss entrance');
+});
+
+test('stage 3 boss homages use ordinary round bullets with different spatial demands', () => {
+  for (const phase of [1, 2, 3, 4]) {
+    const s = createCheckpoint({ stage: 2, bossPhase: phase }, () => .5);
+    s.status = 'playing'; s.autoFire = false; s.player.invincible = 999;
+    const colors = new Set(); let peak = 0, retargeted = false;
+    for (let frame = 0; frame < 1800; frame++) {
+      tick(s, .02);
+      peak = Math.max(peak, s.bullets.length);
+      for (const b of s.bullets) { colors.add(b.color); assert.equal(b.radius, 3.5); retargeted ||= !!b.retargeted; }
+      assert.equal(s.lasers.length, 0);
+    }
+    assert.ok(peak < 1800); assert.ok(colors.size >= 2);
+    if (phase === 1) assert.ok(peak > 900);
+    if (phase === 2) assert.equal(retargeted, true);
+    if (phase === 3) { assert.ok(colors.has(0xffd88c)); assert.ok(colors.has(0xd6acff)); }
+    if (phase === 4) { assert.equal(s.boss.intensity, 3); assert.equal(colors.size, 4); }
+  }
+});
+
+test('the final homage escalates by damage as well as time', () => {
+  const s = createCheckpoint({ stage: 2, bossPhase: 4 }); s.status = 'playing'; s.autoFire = false;
+  advance(s, .5); assert.equal(s.boss.intensity, 0);
+  s.boss.hp = 130; tick(s, .02); assert.equal(s.boss.intensity, 3);
+  assert.ok(s.boss.attackClock.blue); assert.ok(s.boss.attackClock.gold);
 });

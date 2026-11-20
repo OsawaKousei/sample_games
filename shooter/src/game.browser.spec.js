@@ -127,9 +127,9 @@ test('Starfall: dense authored encounters and all final boss phases render witho
   await page.goto('http://127.0.0.1:3101');
   await expect(page.locator('.phaser-host canvas')).toBeVisible();
   const fixtures = [
-    { stage: 1, seconds: 9 }, { stage: 2, seconds: 38 },
+    { stage: 1, seconds: 9 }, { stage: 2, seconds: 6 }, { stage: 2, seconds: 10 },
     { stage: 2, phase: 1, seconds: 4 }, { stage: 2, phase: 2, seconds: 12 },
-    { stage: 2, phase: 3, seconds: 14 }, { stage: 2, phase: 4, seconds: 6 },
+    { stage: 2, phase: 3, seconds: 14 }, { stage: 2, phase: 4, seconds: 18 },
   ];
   for (const fixture of fixtures) {
     const count = await page.evaluate(async fixture => {
@@ -149,8 +149,40 @@ test('Starfall: dense authored encounters and all final boss phases render witho
     expect(count).toBeGreaterThan(70);
     await expect(page.locator('.viewport-label h2')).toHaveText(`STAGE ${fixture.stage + 1}`);
     if (fixture.phase) await expect(page.locator('.boss-hud')).toContainText(`PHASE ${fixture.phase} / 4`);
-    await page.screenshot({ path: `test-results/shooter-barrage-${fixture.stage + 1}-${fixture.phase || 'wave'}.png` });
+    await page.screenshot({ path: `test-results/shooter-barrage-${fixture.stage + 1}-${fixture.phase || `wave-${fixture.seconds}`}.png` });
     await expectFits(page);
   }
+  expect(errors).toEqual([]);
+});
+
+
+test('Starfall: every debug URL starts and retries its selected checkpoint at full strength', async ({ page }) => {
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto('http://127.0.0.1:3101/debug');
+  await expect(page.getByRole('heading', { name: 'デバッグ', exact: true })).toBeVisible();
+  const paths = await page.locator('.debug-stages a').evaluateAll(links => links.map(a => a.getAttribute('href')));
+  expect(paths).toHaveLength(12);
+  for (const path of paths) {
+    await page.goto(`http://127.0.0.1:3101${path}`);
+    await expect(page.locator('.phaser-host canvas')).toBeVisible();
+    await expect(page.locator('.shield-resource strong')).toHaveText('5 / 5');
+    await expect(page.locator('.power-resource strong')).toHaveText('3 / 3');
+    await expect(page.locator('.bombs .available')).toHaveCount(3);
+    const stage = Number(path.match(/(?:stage|boss)\/(\d)/)[1]);
+    const phase = path.match(/phase\/(\d)/)?.[1];
+    await expect(page.locator('.viewport-label h2')).toHaveText(`STAGE ${stage}`);
+    if (phase) await expect(page.locator('.boss-hud')).toContainText(`PHASE ${phase}`);
+    else await expect(page.locator('.boss-hud')).toHaveCount(0);
+    await page.getByRole('button', { name: 'ゲーム開始', exact: true }).click();
+    await page.getByRole('button', { name: /ボムを使う/ }).click();
+    await expect(page.locator('.bombs .available')).toHaveCount(2);
+    await page.keyboard.press('p');
+    await page.getByRole('button', { name: '最初から', exact: true }).click();
+    await expect(page.locator('.bombs .available')).toHaveCount(3);
+    await expect(page.locator('.viewport-label h2')).toHaveText(`STAGE ${stage}`);
+    if (phase) await expect(page.locator('.boss-hud')).toContainText(`PHASE ${phase}`);
+  }
+  await page.goto('http://127.0.0.1:3101/debug/boss/3/phase/9');
+  await expect(page.getByRole('alert')).toHaveText('開始位置が見つかりません。');
   expect(errors).toEqual([]);
 });

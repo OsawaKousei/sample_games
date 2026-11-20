@@ -1,4 +1,6 @@
 import { emit, queueAttack, updateBarrage } from './patterns.js';
+import { updateStage3Route, updateStage3Boss } from './stage3.js';
+import { updateLasers, laserHits } from './lasers.js';
 import { WAVE_DURATIONS, ENCOUNTERS, BOSS_SCORES, BOSS_PHASE_HP } from './choreography.js';
 export { WAVE_DURATIONS } from './choreography.js';
 export const WIDTH = 480, HEIGHT = 720, WAVE_SECONDS = 25;
@@ -11,11 +13,28 @@ export const STAGES = [
 export function createGame(random = Math.random) {
   return { status: 'ready', stage: 0, time: 0, totalTime: 0,
     player: { x: WIDTH / 2, y: HEIGHT - 100, hp: 5, maxHp: 5, power: 1, invincible: 0 },
-    enemies: [], bullets: [], shots: [], particles: [], pickups: [], cues: [], salvos: [],
+    enemies: [], bullets: [], shots: [], particles: [], pickups: [], cues: [], salvos: [], lasers: [], routeClock: {},
     boss: null, bossSpawned: false, score: 0, kills: 0, bombs: 2,
     shotTimer: 0, spawnTimer: .4, encounter: 0, id: 0, wave: 0, random, shake: 0, flash: 0,
     transition: 0, shotsFired: 0, hits: 0, autoFire: true };
 }
+export function createCheckpoint({ stage, bossPhase }, random = Math.random) {
+  if (!Number.isInteger(stage) || stage < 0 || stage >= STAGES.length ||
+      (bossPhase !== undefined && (!Number.isInteger(bossPhase) || bossPhase < 1 || bossPhase > BOSS_PHASE_HP[stage].length))) {
+    throw new RangeError('Invalid shooter checkpoint');
+  }
+  const s = createGame(random);
+  s.stage = stage; s.debug = true; s.checkpoint = { stage, bossPhase };
+  s.player.power = 3; s.bombs = 3;
+  if (bossPhase !== undefined) {
+    s.time = WAVE_DURATIONS[stage]; spawnBoss(s);
+    s.boss.y = 125; s.boss.phase = bossPhase;
+    s.boss.hp = BOSS_PHASE_HP[stage].slice(bossPhase - 1).reduce((sum, hp) => sum + hp, 0);
+    s.flash = 0;
+  }
+  return s;
+}
+
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 export function explosion(s, x, y, color = 0xffbe77, count = 20) {
   for (let i = 0; i < count; i++) {
@@ -35,11 +54,11 @@ function damage(s) {
   explosion(s, p.x, p.y, 0x9eeeff, 14);
   if (!p.hp) s.status = 'lost';
 }
-function clearBarrage(s) { s.bullets = []; s.salvos = []; s.cues = []; }
+function clearBarrage(s) { s.bullets = []; s.salvos = []; s.cues = []; s.lasers = []; }
 function phaseFloor(s) { return BOSS_PHASE_HP[s.stage].slice(s.boss.phase).reduce((sum, hp) => sum + hp, 0); }
 function hitBoss(s, amount) {
   const b = s.boss;
-  if (!b || b.breakTime > 0 || b.y < 100) return;
+  if (!b || b.y < 100) return;
   b.hp = Math.max(s.stage === 0 ? 0 : phaseFloor(s), b.hp - amount);
   b.hit = .06;
 }
@@ -93,7 +112,7 @@ function updateEnemies(s, dt) {
 function spawnBoss(s) {
   const maxHp = BOSS_PHASE_HP[s.stage].reduce((sum, hp) => sum + hp, 0);
   s.boss = { x: 240, y: -80, hp: maxHp, maxHp, age: 0, fire: 1.3, phase: 1, radius: 57, hit: 0,
-    phaseTime: 0, eventIndex: 0, cycle: 0, breakTime: 0 };
+    phaseTime: 0, eventIndex: 0, cycle: 0, motionTime: 0, attackClock: {} };
   s.bossSpawned = true; s.enemies = []; clearBarrage(s); s.flash = .35;
 }
 function updateBoss(s, dt) {
@@ -112,22 +131,25 @@ function updateBoss(s, dt) {
       b.fire = b.phase === 1 ? .95 : .85;
     }
   } else {
-    b.x = WIDTH / 2 + Math.sin(b.phaseTime * .48 + b.phase - 1) * (s.stage === 2 ? 135 : 100);
-    if (b.breakTime > 0) { b.breakTime = Math.max(0, b.breakTime - dt); return; }
+    b.motionTime += dt;
+    b.x = WIDTH / 2 + Math.sin(b.motionTime * .48) * (s.stage === 2 ? 135 : 100);
     if (b.y >= 100) {
       b.phaseTime += dt;
-      const score = BOSS_SCORES[s.stage][b.phase - 1];
-      const cycleLength = score.at(-1)[0] + 3.5;
-      while (b.eventIndex < score.length && b.phaseTime >= score[b.eventIndex][0]) {
-        // Mirror emitters and walk through a different gate order on the reprise.
-        const index = b.cycle % 2 ? score.length - 1 - b.eventIndex : b.eventIndex;
-        const pattern = score[index][1];
-        const variant = (b.phase - 1) * 2 + b.eventIndex + b.cycle * 3;
-        const originX = pattern === 'sweep' ? (variant % 2 ? 400 : 80) : b.x;
-        queueAttack(s, pattern, originX, b.y + 30, s.stage === 2, variant, .65);
-        b.eventIndex++;
+      if (s.stage === 2) updateStage3Boss(s);
+      else {
+        const score = BOSS_SCORES[s.stage][b.phase - 1];
+        const cycleLength = score.at(-1)[0] + 3.5;
+        while (b.eventIndex < score.length && b.phaseTime >= score[b.eventIndex][0]) {
+          // Mirror emitters and walk through a different gate order on the reprise.
+          const index = b.cycle % 2 ? score.length - 1 - b.eventIndex : b.eventIndex;
+          const pattern = score[index][1];
+          const variant = (b.phase - 1) * 2 + b.eventIndex + b.cycle * 3;
+          const originX = pattern === 'sweep' ? (variant % 2 ? 400 : 80) : b.x;
+          queueAttack(s, pattern, originX, b.y + 30, s.stage === 2, variant, .65);
+          b.eventIndex++;
+        }
+        if (b.phaseTime >= cycleLength) { b.phaseTime -= cycleLength; b.eventIndex = 0; b.cycle++; }
       }
-      if (b.phaseTime >= cycleLength) { b.phaseTime -= cycleLength; b.eventIndex = 0; b.cycle++; }
     }
   }
   if (Math.hypot(b.x - s.player.x, b.y - s.player.y) < b.radius + PLAYER_RADIUS) damage(s);
@@ -140,7 +162,7 @@ function finishBossPhase(s) {
     s.boss = null; clearBarrage(s); s.shots = []; s.shake = .7; s.flash = .7;
     if (s.stage === 2) s.status = 'won'; else { s.status = 'transition'; s.transition = 3; }
   } else if (s.stage > 0 && b.hp <= phaseFloor(s)) {
-    b.phase++; b.phaseTime = 0; b.eventIndex = 0; b.cycle = 0; b.breakTime = 1.1;
+    b.phase++; b.phaseTime = 0; b.eventIndex = 0; b.cycle = 0; b.attackClock = {};
     clearBarrage(s); s.shots = []; explosion(s, b.x, b.y, STAGES[s.stage].rgb, 40);
   }
 }
@@ -158,7 +180,7 @@ export function tick(s, dt, input = {}) {
   if (s.status === 'transition') {
     s.transition -= dt;
     if (s.transition <= 0) {
-      s.stage++; s.time = 0; s.bossSpawned = false; s.status = 'playing'; s.encounter = 0; s.spawnTimer = .6;
+      s.stage++; s.time = 0; s.bossSpawned = false; s.status = 'playing'; s.encounter = 0; s.spawnTimer = .6; s.routeClock = {};
       s.player.hp = Math.min(s.player.maxHp, s.player.hp + 1); s.bombs = Math.min(3, s.bombs + 1); s.pickups = [];
     }
     return;
@@ -187,7 +209,8 @@ export function tick(s, dt, input = {}) {
     if (s.stage === 0) {
       s.spawnTimer -= dt;
       if (s.spawnTimer <= 0) { spawnTutorialWave(s); s.spawnTimer += 3; }
-    } else {
+    } else if (s.stage === 2) updateStage3Route(s);
+    else {
       const encounters = ENCOUNTERS[s.stage];
       while (s.encounter < encounters.length && s.time >= encounters[s.encounter][0]) {
         spawnEncounter(s, encounters[s.encounter], s.encounter); s.encounter++;
@@ -197,6 +220,7 @@ export function tick(s, dt, input = {}) {
   updateEnemies(s, dt);
   if (s.boss) updateBoss(s, dt);
   updateBarrage(s, dt);
+  updateLasers(s, dt);
   for (const shot of s.shots) {
     const oldX = shot.x, oldY = shot.y;
     shot.x += shot.vx * dt; shot.y += shot.vy * dt;
@@ -205,7 +229,7 @@ export function tick(s, dt, input = {}) {
         e.hp -= shot.damage; shot.dead = true; s.hits++; explosion(s, shot.x, shot.y, 0x9eeeff, 3); break;
       }
     }
-    if (!shot.dead && s.boss && s.boss.breakTime <= 0 && s.boss.y >= 100 && segmentDistance(s.boss.x, s.boss.y, oldX, oldY, shot.x, shot.y) < s.boss.radius + shot.radius) {
+    if (!shot.dead && s.boss && s.boss.y >= 100 && segmentDistance(s.boss.x, s.boss.y, oldX, oldY, shot.x, shot.y) < s.boss.radius + shot.radius) {
       hitBoss(s, shot.damage); shot.dead = true; s.hits++; explosion(s, shot.x, shot.y, 0xffd29c, 2);
     }
   }
@@ -213,6 +237,12 @@ export function tick(s, dt, input = {}) {
   for (const b of s.bullets) {
     const oldX = b.x, oldY = b.y;
     b.age = (b.age || 0) + dt;
+    if (b.age < (b.wait || 0)) continue;
+    if (b.retargetAt && !b.retargeted && b.age >= b.retargetAt) {
+      const angle = Math.atan2(p.y - b.y, p.x - b.x);
+      b.vx = Math.cos(angle) * b.retargetSpeed; b.vy = Math.sin(angle) * b.retargetSpeed;
+      b.retargeted = true;
+    }
     if (b.acceleration && b.age >= b.accelerateAfter && b.age <= b.accelerateUntil) {
       const speed = Math.hypot(b.vx, b.vy), factor = (speed + b.acceleration * dt) / speed;
       b.vx *= factor; b.vy *= factor;
@@ -220,6 +250,7 @@ export function tick(s, dt, input = {}) {
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (segmentDistance(0, 0, oldX - previousX, oldY - previousY, b.x - p.x, b.y - p.y) < b.radius + PLAYER_RADIUS) { damage(s); b.dead = true; }
   }
+  for (const laser of s.lasers) if (laserHits(laser, previousX, previousY, p.x, p.y, PLAYER_RADIUS)) damage(s);
   s.bullets = s.bullets.filter(b => !b.dead && b.x > -80 && b.x < WIDTH + 80 && b.y > -140 && b.y < HEIGHT + 60 && b.age < 14);
   for (const e of s.enemies.filter(e => e.hp <= 0)) {
     s.kills++; s.score += e.kind === 'tank' ? 250 : 100; explosion(s, e.x, e.y, STAGES[s.stage].rgb);
@@ -238,8 +269,8 @@ export function tick(s, dt, input = {}) {
   finishBossPhase(s);
 }
 export function snapshot(s) {
-  return { status: s.status, stage: s.stage, time: s.time, totalTime: s.totalTime, hp: s.player.hp, power: s.player.power,
+  return { debug: Boolean(s.debug), checkpoint: s.checkpoint || null, status: s.status, stage: s.stage, time: s.time, totalTime: s.totalTime, hp: s.player.hp, power: s.player.power,
     score: s.score, kills: s.kills, bombs: s.bombs, autoFire: s.autoFire,
-    boss: s.boss ? { hp: Math.max(0, s.boss.hp), maxHp: s.boss.maxHp, phase: s.boss.phase, phaseCount: BOSS_PHASE_HP[s.stage].length, breakTime: s.boss.breakTime } : null,
+    boss: s.boss ? { hp: Math.max(0, s.boss.hp), maxHp: s.boss.maxHp, phase: s.boss.phase, phaseCount: BOSS_PHASE_HP[s.stage].length } : null,
     accuracy: s.shotsFired ? Math.round(s.hits / s.shotsFired * 100) : 0 };
 }

@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
-import { createGame, tick, bomb, snapshot, WIDTH, HEIGHT, STAGES } from './model.js';
-export function mountGame(parent,onChange){
-  let gameState=createGame(),sceneRef=null;
+import { laserActive } from './lasers.js';
+import { createGame, createCheckpoint, tick, bomb, snapshot, WIDTH, HEIGHT, STAGES } from './model.js';
+export function mountGame(parent,onChange,entry=null){
+  const freshGame=()=>entry?createCheckpoint(entry):createGame();
+  let gameState=freshGame(),sceneRef=null;
   const controller={
-    start(){const autoFire=gameState.autoFire;gameState=createGame();gameState.autoFire=autoFire;gameState.status='playing';sceneRef?.input.keyboard.resetKeys();onChange(snapshot(gameState));},
+    start(){const autoFire=gameState.autoFire;gameState=freshGame();gameState.autoFire=autoFire;gameState.status='playing';sceneRef?.input.keyboard.resetKeys();onChange(snapshot(gameState));},
     pause(){if(gameState.status==='playing'||gameState.status==='transition'){gameState.previousStatus=gameState.status;gameState.status='paused';}else if(gameState.status==='paused')gameState.status=gameState.previousStatus||'playing';sceneRef?.input.keyboard.resetKeys();onChange(snapshot(gameState));},
     setInputEnabled(enabled){if(sceneRef){sceneRef.input.keyboard.resetKeys();sceneRef.input.keyboard.enabled=enabled;}},
     bomb(){bomb(gameState);},toggleAuto(){gameState.autoFire=!gameState.autoFire;onChange(snapshot(gameState));},
@@ -55,6 +57,8 @@ export function mountGame(parent,onChange){
             for(let y=10;y<HEIGHT;y+=24)g.lineBetween(edge,y,edge,y+10);
           }
           g.lineBetween(cue.gapX-half,18,cue.gapX+half,18);
+        }else if(cue.pattern==='cage'){
+          g.strokeCircle(cue.x,cue.y,cue.radius);
         }else if(cue.pattern==='stream'){
           const angle=Math.atan2(cue.targetY-cue.y,cue.targetX-cue.x);
           const length=900;
@@ -67,11 +71,29 @@ export function mountGame(parent,onChange){
           g.strokeCircle(cue.x,cue.y,35-progress*15);
         }
       }
+      for (const laser of s.lasers) {
+        const active = laserActive(laser);
+        const warning = laser.age < laser.warning;
+        if (warning) {
+          g.lineStyle(1, laser.color, .25 + .4 * laser.age / laser.warning);
+          g.lineBetween(laser.x1, laser.y1, laser.x2, laser.y2);
+          g.lineStyle(1, laser.color, .7);
+          g.strokeCircle(laser.x1, laser.y1, 8);
+        } else {
+          const opacity = active ? 1 : Math.max(0, 1 - (laser.age - laser.warning - laser.duration) / laser.fade);
+          g.lineStyle(laser.width + 8, laser.color, .12 * opacity);
+          g.lineBetween(laser.x1, laser.y1, laser.x2, laser.y2);
+          g.lineStyle(laser.width, laser.color, .85 * opacity);
+          g.lineBetween(laser.x1, laser.y1, laser.x2, laser.y2);
+          g.lineStyle(2, 0xf4fcff, opacity);
+          g.lineBetween(laser.x1, laser.y1, laser.x2, laser.y2);
+        }
+      }
       for(const item of s.pickups){const color=item.kind==='power'?0xa4e9b2:0xffa7b1;g.fillStyle(color,.13);g.fillCircle(item.x,item.y,20);g.lineStyle(1,color,.8);g.strokeCircle(item.x,item.y,12);g.lineStyle(3,color);g.lineBetween(item.x-5,item.y,item.x+5,item.y);if(item.kind==='health')g.lineBetween(item.x,item.y-5,item.x,item.y+5);else{g.lineBetween(item.x-5,item.y+4,item.x,item.y-4);g.lineBetween(item.x,item.y-4,item.x+5,item.y+4);}}
       for(const shot of s.shots){g.fillStyle(0x86eeff,.12);g.fillRoundedRect(shot.x-5,shot.y-12,10,27,5);g.fillStyle(0xc1fbff);g.fillRoundedRect(shot.x-1.5,shot.y-10,3,19,2);}
       for(const e of s.enemies){if(e.kind==='tank'){this.polygon([{x:e.x-24,y:e.y-15},{x:e.x+24,y:e.y-15},{x:e.x+19,y:e.y+18},{x:e.x,y:e.y+25},{x:e.x-19,y:e.y+18}],0x484655,1,stage.rgb);g.fillStyle(0xffa9a9);g.fillRect(e.x-10,e.y,20,4);}else this.ship(e.x,e.y,e.kind==='runner'?.75:.9,true,s.stage===0?0xffb39c:0xe5a1ea);}
-      if(s.boss){const b=s.boss,c=[stage.rgb,0xff96ba,0x91e9ff,0xffd88c][b.phase-1];g.fillStyle(c,.035);g.fillCircle(b.x,b.y,85+Math.sin(t*2)*8);this.polygon([{x:b.x-65,y:b.y-24},{x:b.x-30,y:b.y-45},{x:b.x,y:b.y-26},{x:b.x+30,y:b.y-45},{x:b.x+65,y:b.y-24},{x:b.x+52,y:b.y+30},{x:b.x+23,y:b.y+16},{x:b.x,y:b.y+52},{x:b.x-23,y:b.y+16},{x:b.x-52,y:b.y+30}],b.hit?0xa8a4ae:0x37384f,1,c);g.lineStyle(b.breakTime>0?3:2,c,b.breakTime>0?.4:.8);g.strokeCircle(b.x,b.y,b.breakTime>0?68:22);g.fillStyle(c);g.fillCircle(b.x,b.y,9+Math.sin(t*7)*2);for(const dx of [-43,43]){g.fillStyle(c,.9);g.fillRect(b.x+dx-3,b.y+12,6,18);}}
-      for(const b of s.bullets){g.fillStyle(b.color,.16);g.fillCircle(b.x,b.y,b.radius+2);g.fillStyle(b.color);g.fillCircle(b.x,b.y,b.radius);g.fillStyle(0xfff4fa);g.fillCircle(b.x,b.y,1.4);}
+      if(s.boss){const b=s.boss,c=[stage.rgb,0xff96ba,0x91e9ff,0xffd88c][b.phase-1];g.fillStyle(c,.035);g.fillCircle(b.x,b.y,85+Math.sin(t*2)*8);this.polygon([{x:b.x-65,y:b.y-24},{x:b.x-30,y:b.y-45},{x:b.x,y:b.y-26},{x:b.x+30,y:b.y-45},{x:b.x+65,y:b.y-24},{x:b.x+52,y:b.y+30},{x:b.x+23,y:b.y+16},{x:b.x,y:b.y+52},{x:b.x-23,y:b.y+16},{x:b.x-52,y:b.y+30}],b.hit?0xa8a4ae:0x37384f,1,c);g.lineStyle(2,c,.8);g.strokeCircle(b.x,b.y,22);g.fillStyle(c);g.fillCircle(b.x,b.y,9+Math.sin(t*7)*2);for(const dx of [-43,43]){g.fillStyle(c,.9);g.fillRect(b.x+dx-3,b.y+12,6,18);}}
+      for(const b of s.bullets){g.fillStyle(b.color,.16);g.fillCircle(b.x,b.y,b.radius+2);g.fillStyle(b.color,b.age<(b.wait||0)?.3:1);g.fillCircle(b.x,b.y,b.radius);g.fillStyle(0xfff4fa);g.fillCircle(b.x,b.y,1.4);}
       const p=s.player;if(s.status!=='lost'&&(p.invincible<=0||Math.floor(t*15)%2===0)){g.fillStyle(0x7ce6e9,.05);g.fillCircle(p.x,p.y,34);this.ship(p.x,p.y,1,false);g.fillStyle(0xffffff);g.fillCircle(p.x,p.y,3);if(this.keys.focus.isDown){g.lineStyle(1,0xb9f8ff,.6);g.strokeCircle(p.x,p.y,12);}if(p.invincible>0){g.lineStyle(1,0x9cefff,.6);g.strokeCircle(p.x,p.y,28);}}
       for(const pt of s.particles){g.fillStyle(pt.color,Math.max(0,pt.life/pt.max));g.fillCircle(pt.x,pt.y,pt.size*(pt.life/pt.max+.3));}
       if(s.flash>0){g.fillStyle(stage.rgb,Math.min(.5,s.flash*.6));g.fillRect(0,0,WIDTH,HEIGHT);}if(s.shake>0){g.setPosition(Math.sin(t*87)*s.shake*8,Math.cos(t*61)*s.shake*7);}else g.setPosition(0,0);
