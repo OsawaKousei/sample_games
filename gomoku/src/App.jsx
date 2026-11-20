@@ -18,6 +18,7 @@ export default function App() {
   useEffect(() => {
     if (reviewing || ended || cursor % 2 === 0) { setThinking(false); return; }
     setThinking(true); setAnalysis(null); setError('');
+    const startedAt = performance.now();
     const worker = new Worker(new URL('./ai.worker.js', import.meta.url), { type: 'module' });
     let timer;
     worker.onmessage = ({ data }) => {
@@ -27,7 +28,7 @@ export default function App() {
         timer = setTimeout(() => {
           if (data.index >= 0) { setMoves(previous => [...previous, data.index]); setCursor(previous => previous + 1); }
           setThinking(false);
-        }, 280);
+        }, Math.max(0, 280 - (performance.now() - startedAt)));
       }
     };
     worker.onerror = () => { setError('AIを起動できませんでした。一手戻して再試行してください。'); setThinking(false); };
