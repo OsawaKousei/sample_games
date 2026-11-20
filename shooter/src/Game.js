@@ -91,7 +91,14 @@ export function mountGame(parent,onChange,entry=null){
         }
       }
       for(const item of s.pickups){const color=item.kind==='power'?0xa4e9b2:0xffa7b1;g.fillStyle(color,.13);g.fillCircle(item.x,item.y,20);g.lineStyle(1,color,.8);g.strokeCircle(item.x,item.y,12);g.lineStyle(3,color);g.lineBetween(item.x-5,item.y,item.x+5,item.y);if(item.kind==='health')g.lineBetween(item.x,item.y-5,item.x,item.y+5);else{g.lineBetween(item.x-5,item.y+4,item.x,item.y-4);g.lineBetween(item.x,item.y-4,item.x+5,item.y+4);}}
-      for(const shot of s.shots){g.fillStyle(0x86eeff,.12);g.fillRoundedRect(shot.x-5,shot.y-12,10,27,5);g.fillStyle(0xc1fbff);g.fillRoundedRect(shot.x-1.5,shot.y-10,3,19,2);}
+      for(const shot of s.shots){
+        if(shot.homing){
+          const speed=Math.hypot(shot.vx,shot.vy)||1,dx=shot.vx/speed,dy=shot.vy/speed;
+          g.lineStyle(7,0x9dffd0,.15);g.lineBetween(shot.x-dx*15,shot.y-dy*15,shot.x,shot.y);
+          g.lineStyle(3,0xb8ffe0,.95);g.lineBetween(shot.x-dx*9,shot.y-dy*9,shot.x,shot.y);
+          g.fillStyle(0xeefff6);g.fillCircle(shot.x,shot.y,2.5);
+        }else{g.fillStyle(0x86eeff,.12);g.fillRoundedRect(shot.x-5,shot.y-12,10,27,5);g.fillStyle(0xc1fbff);g.fillRoundedRect(shot.x-1.5,shot.y-10,3,19,2);}
+      }
       for(const e of s.enemies){if(e.kind==='tank'){this.polygon([{x:e.x-24,y:e.y-15},{x:e.x+24,y:e.y-15},{x:e.x+19,y:e.y+18},{x:e.x,y:e.y+25},{x:e.x-19,y:e.y+18}],0x484655,1,stage.rgb);g.fillStyle(0xffa9a9);g.fillRect(e.x-10,e.y,20,4);}else this.ship(e.x,e.y,e.kind==='runner'?.75:.9,true,s.stage===0?0xffb39c:0xe5a1ea);}
       if(s.boss){const b=s.boss,c=[stage.rgb,0xff96ba,0x91e9ff,0xffd88c][b.phase-1];g.fillStyle(c,.035);g.fillCircle(b.x,b.y,85+Math.sin(t*2)*8);this.polygon([{x:b.x-65,y:b.y-24},{x:b.x-30,y:b.y-45},{x:b.x,y:b.y-26},{x:b.x+30,y:b.y-45},{x:b.x+65,y:b.y-24},{x:b.x+52,y:b.y+30},{x:b.x+23,y:b.y+16},{x:b.x,y:b.y+52},{x:b.x-23,y:b.y+16},{x:b.x-52,y:b.y+30}],b.hit?0xa8a4ae:0x37384f,1,c);g.lineStyle(2,c,.8);g.strokeCircle(b.x,b.y,22);g.fillStyle(c);g.fillCircle(b.x,b.y,9+Math.sin(t*7)*2);for(const dx of [-43,43]){g.fillStyle(c,.9);g.fillRect(b.x+dx-3,b.y+12,6,18);}}
       this.bulletRenderer.draw(s.bullets,WIDTH,HEIGHT);

@@ -36,6 +36,30 @@ export function createCheckpoint({ stage, bossPhase }, random = Math.random) {
 }
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+
+// Keep a lock while the target is alive and visible; reacquire on destruction
+// or departure. A capped turn rate produces a readable curved flight path.
+function steerHomingShot(s, shot, dt) {
+  const visible = e => e.hp > 0 && e.x >= 0 && e.x <= WIDTH && e.y >= 0 && e.y <= HEIGHT;
+  let target = shot.targetId === 'boss' ? s.boss : s.enemies.find(e => e.id === shot.targetId);
+  if (!target || !visible(target) || target === s.boss && target.y < 100) {
+    target = null;
+    let nearest = Infinity;
+    for (const enemy of s.enemies) {
+      if (!visible(enemy)) continue;
+      const distance = (enemy.x - shot.x) ** 2 + (enemy.y - shot.y) ** 2;
+      if (distance < nearest) { nearest = distance; target = enemy; }
+    }
+    if (s.boss && visible(s.boss) && s.boss.y >= 100 &&
+      (s.boss.x - shot.x) ** 2 + (s.boss.y - shot.y) ** 2 < nearest) target = s.boss;
+    shot.targetId = target ? target === s.boss ? 'boss' : target.id : null;
+  }
+  if (!target) return;
+  const angle = Math.atan2(shot.vy, shot.vx), desired = Math.atan2(target.y - shot.y, target.x - shot.x);
+  const difference = Math.atan2(Math.sin(desired - angle), Math.cos(desired - angle));
+  const next = angle + clamp(difference, -5 * dt, 5 * dt);
+  shot.vx = Math.cos(next) * 520; shot.vy = Math.sin(next) * 520;
+}
 export function explosion(s, x, y, color = 0xffbe77, count = 20) {
   for (let i = 0; i < count; i++) {
     const a = s.random() * Math.PI * 2, v = 30 + s.random() * 160;
@@ -205,9 +229,11 @@ export function tick(s, dt, input = {}) {
   s.shotTimer -= dt;
   if ((s.autoFire || input.fire) && s.shotTimer <= 0) {
     s.shotTimer += .14;
-    const angles = p.power === 1 ? [0] : p.power === 2 ? [-.055, .055] : [-.11, 0, .11];
+    const side = Math.floor(s.shotsFired / p.power) % 2 ? 1 : -1;
+    const angles = p.power === 1 ? [0] : p.power === 2 ? [0, side * .24] : [0, -.24, .24];
     for (const angle of angles) {
-      s.shots.push({ id: ++s.id, x: p.x, y: p.y - 20, vx: Math.sin(angle) * 520, vy: -Math.cos(angle) * 520, radius: 4, damage: 2 });
+      s.shots.push({ id: ++s.id, x: p.x, y: p.y - 20, vx: Math.sin(angle) * 520, vy: -Math.cos(angle) * 520,
+        radius: 4, damage: 2, age: 0, homing: angle !== 0 });
       s.shotsFired++;
     }
   } else if (s.shotTimer < 0) s.shotTimer = 0;
@@ -229,6 +255,8 @@ export function tick(s, dt, input = {}) {
   updateLasers(s, dt);
   for (const shot of s.shots) {
     const oldX = shot.x, oldY = shot.y;
+    shot.age = (shot.age || 0) + dt;
+    if (shot.homing) steerHomingShot(s, shot, dt);
     shot.x += shot.vx * dt; shot.y += shot.vy * dt;
     for (const e of s.enemies) {
       if (e.hp > 0 && segmentHits(e.x, e.y, oldX, oldY, shot.x, shot.y, e.radius + shot.radius)) {
@@ -239,7 +267,7 @@ export function tick(s, dt, input = {}) {
       hitBoss(s, shot.damage); shot.dead = true; s.hits++; explosion(s, shot.x, shot.y, 0xffd29c, 2);
     }
   }
-  s.shots = s.shots.filter(b => !b.dead && b.y > -25 && b.x > -10 && b.x < WIDTH + 10);
+  s.shots = s.shots.filter(b => !b.dead && b.age < 2.5 && b.y > -25 && b.y < HEIGHT + 25 && b.x > -10 && b.x < WIDTH + 10);
   let remainingBullets = 0;
   for (const b of s.bullets) {
     const oldX = b.x, oldY = b.y;

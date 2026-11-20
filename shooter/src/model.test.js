@@ -155,7 +155,8 @@ test('standing still or blindly sweeping no longer clears the later stages at fu
       tick(s, .02, sweep ? { target: { x: 240 + 200 * Math.sin(s.totalTime * .65), y: 620 } } : {});
     }
     assert.equal(s.status, 'lost');
-    if (stage === 1) assert.ok(s.totalTime < WAVE_DURATIONS[stage]);
+    // Homing companions can clear side formations and reach the boss;
+    // neither stationary fire nor a blind sweep should clear the whole stage.
   }
 });
 
@@ -349,4 +350,68 @@ test('phase 3 forms four stationary clusters, then releases them in a rotating o
   assert.ok(Math.hypot(gold.x - initialGold.x, gold.y - initialGold.y) > 10);
   assert.deepEqual({ x: violet.x, y: violet.y }, initialViolet);
   assert.equal(s.boss.attackClock.winder, undefined);
+});
+
+test('power 2 and 3 fire homing companions alongside the main shot, with normal fire controls', () => {
+  for (const power of [1, 2, 3]) {
+    const s = emptyArena(); s.player.power = power;
+    tick(s, 1 / 60);
+    assert.equal(s.shots.length, 0, 'auto-fire OFF must not launch companions');
+    tick(s, 1 / 60, { fire: true });
+    assert.equal(s.shots.length, power);
+    assert.equal(s.shots.filter(shot => shot.homing).length, power - 1);
+    assert.equal(s.shots.filter(shot => !shot.homing).length, 1);
+    assert.equal(s.shotsFired, power);
+    assert.ok(s.shots.every(shot => shot.damage === 2));
+    s.status = 'paused'; const before = JSON.stringify(s.shots);
+    tick(s, .05, { fire: true }); assert.equal(JSON.stringify(s.shots), before);
+  }
+});
+
+const targetDummy = (id, x, y, hp = 10) => ({ id, x, baseX: x, y, hp, radius: 16,
+  age: 0, kind: 'scout', speed: 0, fire: 999, seed: 0 });
+const guidedShot = () => ({ id: 99, x: 240, y: 600, vx: 0, vy: -520,
+  radius: 4, damage: 2, homing: true, age: 0 });
+
+test('homing rounds curve toward an off-axis enemy and actually damage it', () => {
+  const s = emptyArena(), target = targetDummy(1, 370, 220), shot = guidedShot();
+  s.enemies.push(target); s.shots.push(shot);
+  const initialHeading = Math.atan2(shot.vy, shot.vx);
+  tick(s, 1 / 60);
+  assert.equal(shot.targetId, target.id); assert.ok(shot.vx > 0);
+  assert.ok(Math.abs(Math.atan2(shot.vy, shot.vx) - initialHeading) <= 5 / 60 + 1e-8);
+  assert.ok(Math.abs(Math.hypot(shot.vx, shot.vy) - 520) < 1e-8);
+  advance(s, 1.4);
+  assert.equal(target.hp, 8); assert.equal(s.hits, 1); assert.equal(s.shots.length, 0);
+});
+
+test('homing locks persist, reacquire on death or departure, and ignore the entering boss', () => {
+  const s = emptyArena(), first = targetDummy(1, 280, 300), second = targetDummy(2, 80, 240), shot = guidedShot();
+  s.enemies.push(first, second); s.shots.push(shot);
+  tick(s, .02); assert.equal(shot.targetId, first.id);
+  second.y = 450; second.baseX = 250;
+  tick(s, .02); assert.equal(shot.targetId, first.id, 'a nearer target must not cause lock jitter');
+  first.hp = 0;
+  tick(s, .02); assert.equal(shot.targetId, second.id);
+  second.y = -50;
+  tick(s, .02); assert.equal(shot.targetId, null);
+  const velocity = [shot.vx, shot.vy];
+  tick(s, .02); assert.deepEqual([shot.vx, shot.vy], velocity);
+  const bossState = createCheckpoint({ stage: 2, bossPhase: 2 }, () => .5);
+  bossState.status = 'playing'; bossState.autoFire = false; bossState.boss.y = 80;
+  const bossShot = guidedShot(); bossState.shots.push(bossShot);
+  tick(bossState, .02); assert.equal(bossShot.targetId, null);
+  bossState.boss.y = 125;
+  tick(bossState, .02); assert.equal(bossShot.targetId, 'boss');
+  const hp = bossState.boss.hp;
+  advance(bossState, 1.4);
+  assert.equal(bossState.boss.hp, hp - 2);
+});
+
+test('unclaimed homing rounds have a bounded lifetime and bottom boundary', () => {
+  const s = emptyArena(), shot = guidedShot();
+  shot.vx = 0; shot.vy = 0; shot.age = 2.48;
+  s.shots.push(shot); tick(s, .04); assert.equal(s.shots.length, 0);
+  const downward = guidedShot(); downward.y = HEIGHT + 20; downward.vy = 520;
+  s.shots.push(downward); tick(s, .02); assert.equal(s.shots.length, 0);
 });

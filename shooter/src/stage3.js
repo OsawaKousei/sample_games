@@ -45,11 +45,11 @@ export function updateStage3Boss(s) {
   if (b.phase === 1) {
     // "Trembling Shivering Star": seven aligned rings whose alternating half
     // steps close the preceding gaps. Read the rhythm, then move with the stack.
-    pulse(s, c, 'rings', t, .4, .17, beat => {
+    pulse(s, c, 'rings', t, .4, .19, beat => {
       const group = Math.floor(beat / 7), row = beat % 7;
       if (row === 6) return; // a visible seam gives room to reverse direction
-      const angle = group * .173 + (row % 2) * Math.PI / 90;
-      circle(s, b.x, b.y + 26, 90, angle, 143 + (row % 2) * 7, row % 2 ? BLUE : PINK);
+      const angle = group * .173 + (row % 2) * Math.PI / 78;
+      circle(s, b.x, b.y + 26, 78, angle, 143 + (row % 2) * 7, row % 2 ? BLUE : PINK);
     });
   } else if (b.phase === 2) {
     // Expand around the ship, then aim at its NEW position. Escape through an
@@ -97,30 +97,30 @@ export function updateStage3Boss(s) {
     const remaining = b.hp / 560;
     const level = Math.min(3, Math.max(Math.floor(t / 5), Math.floor((1 - remaining) * 4)));
     b.intensity = level;
-    pulse(s, c, 'red', t, .35, .25, beat => {
+    pulse(s, c, 'red', t, .35, .28, beat => {
       const x = b.x + Math.sin(beat * 1.73) * 70;
-      circle(s, x, b.y + 22, 36, beat * .143, 124, PINK);
+      circle(s, x, b.y + 22, 32, beat * .143, 124, PINK);
     });
     if (level >= 1) {
       c.purpleStart ??= t;
-      pulse(s, c, 'purple', t, c.purpleStart, .48, beat => {
-        for (const side of [-1, 1]) for (let i = 0; i < 9; i++) {
-          const a = .38 + i * .17 + Math.sin(beat * 1.4) * .1;
+      pulse(s, c, 'purple', t, c.purpleStart, .54, beat => {
+        for (const side of [-1, 1]) for (let i = 0; i < 8; i++) {
+          const a = .38 + i * (1.36 / 7) + Math.sin(beat * 1.4) * .1;
           emit(s, side < 0 ? 38 : 442, 155 + beat % 3 * 35, side < 0 ? a : Math.PI - a, 146, { color: VIOLET });
         }
       });
     }
     if (level >= 2) {
       c.blueStart ??= t;
-      pulse(s, c, 'blue', t, c.blueStart, .95, beat => {
+      pulse(s, c, 'blue', t, c.blueStart, 1.05, beat => {
         const side = beat % 2 ? -1 : 1;
-        circle(s, side < 0 ? 50 : 430, 180 + (beat % 3) * 50, 48, beat * .21, 225, BLUE);
+        circle(s, side < 0 ? 50 : 430, 180 + (beat % 3) * 50, 42, beat * .21, 225, BLUE);
       });
     }
     if (level >= 3) {
       c.goldStart ??= t;
-      pulse(s, c, 'gold', t, c.goldStart, .8, beat => {
-        circle(s, b.x, b.y + 22, 24, Math.PI / 24 + beat * .013, 173, GOLD);
+      pulse(s, c, 'gold', t, c.goldStart, .9, beat => {
+        circle(s, b.x, b.y + 22, 21, Math.PI / 21 + beat * .013, 173, GOLD);
       });
     }
   }

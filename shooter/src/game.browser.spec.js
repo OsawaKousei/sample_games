@@ -132,6 +132,7 @@ test('Starfall: dense authored encounters and all final boss phases render witho
     { stage: 2, phase: 1, seconds: 4 }, { stage: 2, phase: 2, seconds: 12 },
     { stage: 2, phase: 3, seconds: .6, label: '3-clusters' },
     { stage: 2, phase: 3, seconds: 2.5 }, { stage: 2, phase: 4, seconds: 18 },
+    { stage: 2, phase: 1, seconds: 4, homing: true, label: '1-homing' },
   ];
   for (const fixture of fixtures) {
     const count = await page.evaluate(async fixture => {
@@ -145,11 +146,21 @@ test('Starfall: dense authored encounters and all final boss phases render witho
         s.boss.hp = BOSS_PHASE_HP[s.stage].slice(fixture.phase - 1).reduce((a, b) => a + b, 0);
       }
       for (let i = 0; i < fixture.seconds * 60; i++) tick(s, 1 / 60);
+      if (fixture.homing) {
+        s.player.power = 3; s.player.x = 70; s.autoFire = true;
+        for (let i = 0; i < 21; i++) tick(s, 1 / 60);
+      }
       window.__shooterQA.load(s);
-      return { bullets: s.bullets.length, lasers: s.lasers.length };
+      return { bullets: s.bullets.length, lasers: s.lasers.length,
+        homing: s.shots.filter(shot => shot.homing && shot.vx > 0).length,
+        straight: s.shots.filter(shot => !shot.homing).length };
     }, fixture);
     expect(count.bullets).toBeGreaterThan(70);
     expect(count.lasers).toBe(0);
+    if (fixture.homing) {
+      expect(count.homing).toBeGreaterThan(0);
+      expect(count.straight).toBeGreaterThan(0);
+    }
     await expect(page.locator('.viewport-label h2')).toHaveText(`STAGE ${fixture.stage + 1}`);
     if (fixture.phase) await expect(page.locator('.boss-hud')).toContainText(`PHASE ${fixture.phase} / 4`);
     await page.screenshot({ path: `test-results/shooter-barrage-${fixture.stage + 1}-${fixture.label || fixture.phase || `wave-${fixture.seconds}`}.png` });
