@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { mountGame } from './Game.js';
-import { createGame, snapshot, STAGES, WAVE_SECONDS } from './model.js';
+import { createGame, snapshot, STAGES, WAVE_DURATIONS } from './model.js';
 
 const format = n => String(n).padStart(7, '0');
 const statusLabels = { ready: '待機中', playing: 'プレイ中', paused: '一時停止', transition: 'クリア', won: 'クリア', lost: '終了' };
@@ -23,7 +23,7 @@ export default function App() {
   }, [hud.status, hud.score, best]);
 
   const stage = STAGES[hud.stage];
-  const progress = hud.boss || ['transition', 'won'].includes(hud.status) ? 100 : Math.min(100, Math.floor(hud.time / WAVE_SECONDS * 100));
+  const progress = hud.boss || ['transition', 'won'].includes(hud.status) ? 100 : Math.min(100, Math.floor(hud.time / WAVE_DURATIONS[hud.stage] * 100));
   const openHelp = () => {
     resumeAfterHelp.current = ['playing', 'transition'].includes(hud.status);
     if (resumeAfterHelp.current) game.current?.pause();
@@ -47,7 +47,7 @@ export default function App() {
         <div className="game-viewport">
           <div className="phaser-host" ref={host} />
           {hud.boss && <div className="boss-hud">
-            <div><span>BOSS</span><span>PHASE {hud.boss.phase}</span></div>
+            <div><span>BOSS</span><span>{hud.boss.breakTime > 0 ? '攻撃準備' : `PHASE ${hud.boss.phase} / ${hud.boss.phaseCount || 2}`}</span></div>
             <div className="meter" role="progressbar" aria-label="ボスの体力" aria-valuenow={Math.round(hud.boss.hp / hud.boss.maxHp * 100)} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${hud.boss.hp / hud.boss.maxHp * 100}%` }} /></div>
           </div>}
           {hud.status === 'ready' && <div className="flight-overlay start-overlay">
@@ -113,7 +113,7 @@ export default function App() {
         <div><dt>一時停止 / 再開</dt><dd><kbd>P</kbd> / <kbd>ESC</kbd></dd></div>
       </dl>
       <p>タッチ操作では、ゲーム画面をドラッグして移動します。自動射撃をONにすると、ショットを撃ち続けます。</p>
-      <p>自機中央の白い点が当たり判定です。ボムは敵弾を消し、短時間無敵になります。</p>
+      <p>自機中央の白い点が当たり判定です。ボムは敵弾を消し、短時間無敵になります。細い線は攻撃予告、縦の点線は壁の隙間です。</p>
     </dialog>
   </div>;
 }

@@ -113,3 +113,44 @@ test('Starfall: transition and result overlays fit in small viewports', async ({
     }
   }
 });
+
+test('Starfall: dense authored encounters and all final boss phases render without errors', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  // Fixtures replace the state inside the real renderer only in this test's response.
+  await page.route('**/src/Game.js', async route => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace('create(){sceneRef=this;',
+      'create(){sceneRef=this;window.__shooterQA={load(state){gameState=state;}};');
+    await route.fulfill({ response, body });
+  });
+  await page.goto('http://127.0.0.1:3101');
+  await expect(page.locator('.phaser-host canvas')).toBeVisible();
+  const fixtures = [
+    { stage: 1, seconds: 9 }, { stage: 2, seconds: 38 },
+    { stage: 2, phase: 1, seconds: 4 }, { stage: 2, phase: 2, seconds: 12 },
+    { stage: 2, phase: 3, seconds: 14 }, { stage: 2, phase: 4, seconds: 6 },
+  ];
+  for (const fixture of fixtures) {
+    const count = await page.evaluate(async fixture => {
+      const { createGame, tick, WAVE_DURATIONS } = await import('/src/model.js');
+      const { BOSS_PHASE_HP } = await import('/src/choreography.js');
+      const s = createGame(() => .5);
+      s.stage = fixture.stage; s.status = 'playing'; s.autoFire = false; s.player.invincible = 999;
+      if (fixture.phase) {
+        s.time = WAVE_DURATIONS[s.stage]; tick(s, 1 / 60); s.boss.y = 125;
+        s.boss.phase = fixture.phase;
+        s.boss.hp = BOSS_PHASE_HP[s.stage].slice(fixture.phase - 1).reduce((a, b) => a + b, 0);
+      }
+      for (let i = 0; i < fixture.seconds * 60; i++) tick(s, 1 / 60);
+      window.__shooterQA.load(s);
+      return s.bullets.length;
+    }, fixture);
+    expect(count).toBeGreaterThan(70);
+    await expect(page.locator('.viewport-label h2')).toHaveText(`STAGE ${fixture.stage + 1}`);
+    if (fixture.phase) await expect(page.locator('.boss-hud')).toContainText(`PHASE ${fixture.phase} / 4`);
+    await page.screenshot({ path: `test-results/shooter-barrage-${fixture.stage + 1}-${fixture.phase || 'wave'}.png` });
+    await expectFits(page);
+  }
+  expect(errors).toEqual([]);
+});
