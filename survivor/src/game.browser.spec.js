@@ -41,7 +41,7 @@ test('Wildbloom: play, dash, pause, help and retry in the real 3D world', async 
   await page.screenshot({ path: 'test-results/survivor-mobile.png' }); expect(errors).toEqual([]);
 });
 
-test('Wildbloom: three upgrade choices pause play, retain queued rewards and reset on retry', async ({ page }) => {
+test('Wildbloom: upgrade arrows and Enter, number keys and clicks retain queued rewards and skip capped skills', async ({ page }) => {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(url); await expect(page.locator('.world-canvas canvas')).toBeVisible();
   await page.evaluate(async () => {
@@ -57,13 +57,21 @@ test('Wildbloom: three upgrade choices pause play, retain queued rewards and res
   await expect(page.getByRole('dialog', { name: '強化を選択' })).toBeVisible();
   await expect(page.locator('.upgrade-choices button')).toHaveCount(3);
   await expect(page.locator('.upgrade-title')).toContainText('残り 4 回');
+  const choices = page.locator('.upgrade-choices button');
+  await expect(choices.nth(0)).toBeFocused();
+  for (const [key, index] of [['ArrowRight', 1], ['ArrowDown', 2], ['ArrowLeft', 1], ['ArrowUp', 0]]) {
+    await page.keyboard.press(key); await expect(choices.nth(index)).toBeFocused();
+  }
+  await expect(page.locator('.upgrade-title')).toContainText('残り 4 回');
   const before = await page.evaluate(() => ({ time: window.testWorld.state.time, x: window.testWorld.state.player.x }));
   await page.keyboard.down('d'); await page.waitForTimeout(300); await page.keyboard.up('d');
   expect(await page.evaluate(() => ({ time: window.testWorld.state.time, x: window.testWorld.state.player.x }))).toEqual(before);
   await page.screenshot({ path: 'test-results/survivor-upgrade.png' });
   await page.keyboard.press('1'); await expect(page.locator('.upgrade-title')).toContainText('残り 3 回');
-  await page.keyboard.press('2'); await page.locator('.upgrade-choices button').nth(2).click();
-  await page.keyboard.press('1'); await expect(page.locator('dialog[open]')).toHaveCount(0);
+  await page.keyboard.press('ArrowRight'); await page.keyboard.press('Enter');
+  await choices.nth(2).click();
+  await page.keyboard.press('ArrowDown'); await expect(choices.nth(0)).toBeFocused();
+  await page.keyboard.press('Enter'); await expect(page.locator('dialog[open]')).toHaveCount(0);
   await expect(page.locator('.upgrade-item.acquired')).toHaveCount(3);
   expect(await page.evaluate(() => window.testWorld.state.build)).toEqual(['power','mobility','guard','power']);
   await page.keyboard.down('d'); await page.waitForTimeout(300); await page.keyboard.up('d');
@@ -73,7 +81,23 @@ test('Wildbloom: three upgrade choices pause play, retain queued rewards and res
   await expect(page.getByRole('heading', { name: 'クリア', exact: true })).toBeVisible();
   await expect(page.locator('.run-results')).toContainText('02:15'); await page.screenshot({ path: 'test-results/survivor-result.png' });
   await page.getByRole('button', { name: 'もう一度プレイ', exact: true }).click();
-  await expect(page.locator('.upgrade-item.acquired')).toHaveCount(0); expect(errors).toEqual([]);
+  await expect(page.locator('.upgrade-item.acquired')).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(async () => {
+    const { snapshot } = await import('/src/model.js');
+    Object.assign(window.testWorld.state, { status: 'upgrade', pendingUpgrades: 2,
+      build: [...Array(8).fill('power'), ...Array(2).fill('mobility')] });
+    window.testWorld.onChange(snapshot(window.testWorld.state));
+  });
+  await expect(choices.nth(0)).toBeDisabled(); await expect(choices.nth(1)).toBeFocused();
+  await page.keyboard.press('ArrowUp'); await expect(choices.nth(2)).toBeFocused();
+  await page.keyboard.press('ArrowDown'); await expect(choices.nth(1)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(choices.nth(1)).toBeDisabled(); await expect(choices.nth(2)).toBeFocused();
+  await page.keyboard.press('ArrowLeft'); await expect(choices.nth(2)).toBeFocused();
+  await page.keyboard.press('Enter'); await expect(page.locator('dialog[open]')).toHaveCount(0);
+  expect(await page.evaluate(() => window.testWorld.state.build.slice(-2))).toEqual(['mobility', 'guard']);
+  expect(errors).toEqual([]);
 });
 
 test('Wildbloom: HUD, accumulated upgrades and overlays fit desktop, mobile and landscape', async ({ page }) => {

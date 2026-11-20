@@ -30,15 +30,19 @@ test('normal movement is faster, diagonals and touch are normalized, focus remai
   assert.equal(JSON.stringify({ ...s, random: null }), before);
 });
 
-test('swept collision catches fast bullets, grants invulnerability and ends the run', () => {
-  const s = emptyArena(); s.player.hp = 2;
+test('swept collision catches fast bullets, restores two bombs on damage, grants invulnerability and ends the run', () => {
+  const s = emptyArena(); s.player.hp = 2; s.bombs = 0;
   s.bullets.push({ x: s.player.x - 40, y: s.player.y, vx: 1600, vy: 0, radius: 3.5 });
   tick(s, .05); assert.equal(s.player.hp, 1); assert.ok(s.player.invincible > 0);
+  assert.equal(s.bombs, 2); assert.equal(snapshot(s).bombs, 2);
+  s.bombs = 1;
   s.bullets.push({ x: s.player.x, y: s.player.y, vx: 0, vy: 0, radius: 3.5 });
   tick(s, .02); assert.equal(s.player.hp, 1);
+  assert.equal(s.bombs, 1, 'invulnerable collisions must not refill bombs');
   s.player.invincible = 0;
   s.bullets.push({ x: s.player.x, y: s.player.y, vx: 0, vy: 0, radius: 3.5 });
   tick(s, .02); assert.equal(s.status, 'lost');
+  assert.equal(s.bombs, 2);
 });
 
 test('powerups enhance shots; bombs clear current AND scheduled attacks and warnings', () => {
@@ -237,7 +241,7 @@ test('all debug paths initialize full resources, clean fields, and the exact sel
 });
 
 test('laser warnings and fades are harmless; the active finite beam catches a crossing player', () => {
-  const s = emptyArena(2); addLaser(s, 240, 100, 240, 650);
+  const s = emptyArena(2); s.bombs = 0; addLaser(s, 240, 100, 240, 650);
   const laser = s.lasers[0];
   assert.equal(laserActive(laser), false);
   assert.equal(laserHits(laser, 230, 620, 250, 620), false);
@@ -248,6 +252,7 @@ test('laser warnings and fades are harmless; the active finite beam catches a cr
   assert.equal(laserHits(laser, 240, 620, 240, 620), false);
   laser.age = 1; s.player.x = 240;
   tick(s, .02); assert.equal(s.player.hp, 4);
+  assert.equal(s.bombs, 2, 'laser damage also restores two bombs');
   s.status = 'paused'; const age = laser.age; tick(s, .02); assert.equal(laser.age, age);
   s.status = 'playing'; bomb(s); assert.equal(s.lasers.length, 0);
 });

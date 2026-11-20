@@ -75,6 +75,7 @@ function damage(s) {
   const p = s.player;
   if (p.invincible > 0) return;
   p.hp = Math.max(0, p.hp - 1); p.invincible = 1.5; s.shake = .3;
+  s.bombs = 2;
   explosion(s, p.x, p.y, 0x9eeeff, 14);
   if (!p.hp) s.status = 'lost';
 }

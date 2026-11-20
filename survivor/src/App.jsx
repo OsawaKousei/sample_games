@@ -23,9 +23,14 @@ export default function App() {
     }
   }, [hud.status, hud.kills, best]);
   useEffect(() => {
-    if (hud.status === 'upgrade' && !upgrades.current.open) upgrades.current.showModal();
-    else if (hud.status !== 'upgrade' && upgrades.current.open) upgrades.current.close();
-  }, [hud.status]);
+    const dialog = upgrades.current;
+    if (hud.status === 'upgrade') {
+      if (!dialog.open) dialog.showModal();
+      if (!dialog.contains(document.activeElement) || document.activeElement.disabled) {
+        dialog.querySelector('button:not(:disabled)')?.focus();
+      }
+    } else if (dialog.open) dialog.close();
+  }, [hud.status, hud.pendingUpgrades]);
   const active = hud.status === 'playing', phase = PHASES[hud.phase];
   const counts = hud.build.reduce((all, id) => ({ ...all, [id]: (all[id] || 0) + 1 }), {});
   function openHelp() {
@@ -44,6 +49,17 @@ export default function App() {
     if (world.current) world.current.touch = { ...world.current.touch, x: x / d, z: z / d };
   }
   function stopMove() { if (world.current) Object.assign(world.current.touch, { x: 0, z: 0 }); }
+  function navigateUpgrades(e) {
+    if (e.key === 'Enter' && e.repeat) { e.preventDefault(); return; }
+    const direction = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+    if (!direction) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const choices = [...upgrades.current.querySelectorAll('button:not(:disabled)')];
+    if (!choices.length) return;
+    const current = choices.indexOf(document.activeElement);
+    choices[(current + direction + choices.length) % choices.length].focus();
+  }
   return <div className={`survivor-app ${hud.hurt > 0 ? 'is-hurt' : ''}`}>
     <header className="survivor-header">
       <h1>WILDBLOOM</h1>
@@ -87,17 +103,18 @@ export default function App() {
         <div className="run-controls"><p><span>WASD / 方向キー：移動</span><span>Space：回避</span><span>P / Esc：一時停止</span></p><div className="dash-status"><span>回避 {hud.dashCooldown > 0 ? `${hud.dashCooldown.toFixed(1)}秒` : '準備完了'}</span><Meter label="回避の再使用" value={hud.stats.dashDelay - hud.dashCooldown} max={hud.stats.dashDelay} /></div><span className="auto-attack">自動攻撃</span></div>
       </section>
     </main>
-    <dialog className="upgrade-dialog" ref={upgrades} onCancel={e => e.preventDefault()} aria-labelledby="upgrade-title">
+    <dialog className="upgrade-dialog" ref={upgrades} onCancel={e => e.preventDefault()} onKeyDown={navigateUpgrades} aria-labelledby="upgrade-title" aria-describedby="upgrade-controls">
       <div className="upgrade-title"><h2 id="upgrade-title">強化を選択</h2><span>残り {hud.pendingUpgrades} 回</span></div>
       <div className="upgrade-choices">{UPGRADES.map((u, i) => <button key={u.id} disabled={(counts[u.id] || 0) >= (u.maxLevel || Infinity)} onClick={() => world.current?.upgrade(u.id)}>
         <span className="choice-number" aria-hidden="true">{i + 1}</span><strong>{u.name}</strong><span className="choice-level">取得 {counts[u.id] || 0}{u.maxLevel ? ` / ${u.maxLevel}` : ''} 回</span><span className="choice-detail">{u.detail}</span>
       </button>)}</div>
+      <p className="upgrade-controls" id="upgrade-controls">方向キー：選択 · Enter：決定 · 1〜3：即決</p>
     </dialog>
     <dialog className="survivor-help" ref={help} onClose={closeHelp} aria-labelledby="survivor-help-title">
       <div className="help-heading"><h2 id="survivor-help-title">操作方法</h2><button aria-label="操作方法を閉じる" onClick={() => help.current.close()}>閉じる</button></div>
       <dl><div><dt>移動</dt><dd>WASD / 方向キー</dd></div><div><dt>回避</dt><dd>Space</dd></div><div><dt>一時停止・再開</dt><dd>P / Esc</dd></div></dl>
       <p>攻撃は自動です。タッチ操作では左のパッドで移動し、右のボタンで回避します。</p>
-      <p>経験値でレベルが上がるか、琥珀色の結晶を拾うと、火力・機動力・耐久力から1つ選べます。選択中は時間が止まります。数字キー1〜3でも選択できます。</p>
+      <p>経験値でレベルが上がるか、琥珀色の結晶を拾うと、火力・機動力・耐久力から1つ選べます。選択中は時間が止まります。方向キーで選んでEnterで決定、数字キー1〜3でも選択できます。</p>
       <p>岩壁は移動と双方の弾を遮ります。突進の予告線から横に逃げ、岩壁へ誘導すると敵が気絶します。</p>
       <p>高台は射程 +4・威力 +20%。登り坂では敵の足が鈍ります。中央のぬかるみは自分の移動速度を32%下げます。琥珀色の結晶と回復は決まった地点に出現します。</p>
       <p>45秒ごとにフェーズが変わり、2分15秒生存するとクリアです。</p>
