@@ -13,6 +13,8 @@
     "shooter": "npm run dev --workspace @arcade/shooter",
     "survivor": "npm run dev --workspace @arcade/survivor",
     "build": "npm run build --workspaces",
+    "deploy": "node infra/deploy.mjs",
+    "verify:deployment": "node infra/verify.mjs",
     "test": "node test-runner.js",
     "test:browser": "playwright test"
   },
