@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test src/model.test.js tools/difficulty.test.mjs",
+    "difficulty": "node tools/measure-difficulty.mjs",
     "dev": "vite --host 127.0.0.1 --port 3000 --strictPort",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 3000 --strictPort"

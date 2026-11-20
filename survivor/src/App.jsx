@@ -1,32 +1,106 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { World } from './World.js';
-import { createRun, snapshot, PHASES, PHASE_SECONDS, TOTAL_SECONDS, UPGRADES } from './model.js';
-const clock = value => `${String(Math.floor(value/60)).padStart(2,'0')}:${String(Math.floor(value%60)).padStart(2,'0')}`;
-export default function App(){
-  const container=useRef(null),world=useRef(null),[hud,setHud]=useState(()=>snapshot(createRun())),[error,setError]=useState('');
-  const [best,setBest]=useState(()=>{try{return Number(localStorage.getItem('wildbloom-best')||0);}catch{return 0;}});
-  useEffect(()=>{let game;try{game=new World(container.current,setHud,setError);world.current=game;}catch{setError('3D描画を開始できません。WebGL 2対応のブラウザで、ハードウェアアクセラレーションを有効にしてください。');}return()=>{game?.dispose();world.current=null;};},[]);
-  useEffect(()=>{if(['won','lost'].includes(hud.status)&&hud.kills>best){setBest(hud.kills);try{localStorage.setItem('wildbloom-best',String(hud.kills));}catch{ /* Storage is optional. */ }}},[hud.status,hud.kills,best]);
-  const phase=PHASES[hud.phase],active=hud.status==='playing';
-  const build=Object.entries(hud.build.reduce((all,id)=>({...all,[id]:(all[id]||0)+1}),{}));
-  function joystick(e){const r=e.currentTarget.getBoundingClientRect();const x=(e.clientX-r.left-r.width/2)/(r.width*.35),z=(e.clientY-r.top-r.height/2)/(r.height*.35);const d=Math.max(1,Math.hypot(x,z));if(world.current)world.current.touch={x:x/d,z:z/d};}
-  return <div className={`survivor-app ${hud.hurt>0?'is-hurt':''}`}>
-    <header className="topbar"><div className="brand"><span className="brand-mark">✳</span> SIGNAL ARCADE</div><div className="collection"><span className="active">03 / WILDBLOOM</span><span>3D SURVIVAL</span></div><span className="badge">GROW. ADAPT. SURVIVE.</span></header>
-    <main className="world-shell">
-      <div className="world-canvas" ref={container}/><div className="world-vignette"/>
-      <div className="world-top"><div className="hero-health"><div className="hero-icon">✧</div><div><div className="health-label"><strong>THE WANDERER</strong><span className="mono">{Math.ceil(hud.hp)} / {hud.maxHp}</span></div><div className="meter health"><span style={{width:`${hud.hp/hud.maxHp*100}%`}}/></div><div className="xp-row"><span>LV. {hud.level}</span><div className="meter"><span style={{width:`${hud.xp/hud.nextXp*100}%`}}/></div></div></div></div>
-        <div className="survival-time"><div className="eyebrow">SURVIVAL TIME</div><strong className="mono">{clock(hud.time)}<small> / {clock(TOTAL_SECONDS)}</small></strong></div>
-        <div className="world-top-right"><div className="kill-count"><span>DEFEATED</span><strong className="mono">{String(hud.kills).padStart(3,'0')}</strong></div><button className="pause-button" disabled={!['playing','paused'].includes(hud.status)} aria-label="一時停止" onClick={()=>world.current?.pause()}>Ⅱ</button></div>
+import { createRun, snapshot, PHASES, TOTAL_SECONDS, UPGRADES } from './model.js';
+
+const clock = value => `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
+const statusLabels = { ready: '開始前', playing: 'プレイ中', paused: '一時停止', upgrade: '強化選択', won: 'クリア', lost: 'ゲームオーバー' };
+function Meter({ label, value, max, className = '' }) {
+  return <div className={`meter ${className}`} role="progressbar" aria-label={label} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={max}><span style={{ width: `${Math.min(100, Math.max(0, value / max * 100))}%` }} /></div>;
+}
+export default function App() {
+  const container = useRef(null), world = useRef(null), help = useRef(null), upgrades = useRef(null), resumeAfterHelp = useRef(false);
+  const [hud, setHud] = useState(() => snapshot(createRun())), [error, setError] = useState('');
+  const [best, setBest] = useState(() => { try { return Number(localStorage.getItem('wildbloom-best') || 0); } catch { return 0; } });
+  useEffect(() => {
+    let game;
+    try { game = new World(container.current, setHud, setError); world.current = game; }
+    catch { setError('3D描画を開始できません。WebGL 2対応のブラウザで、ハードウェアアクセラレーションを有効にしてください。'); }
+    return () => { game?.dispose(); world.current = null; };
+  }, []);
+  useEffect(() => {
+    if (['won', 'lost'].includes(hud.status) && hud.kills > best) {
+      setBest(hud.kills); try { localStorage.setItem('wildbloom-best', String(hud.kills)); } catch { /* Storage is optional. */ }
+    }
+  }, [hud.status, hud.kills, best]);
+  useEffect(() => {
+    if (hud.status === 'upgrade' && !upgrades.current.open) upgrades.current.showModal();
+    else if (hud.status !== 'upgrade' && upgrades.current.open) upgrades.current.close();
+  }, [hud.status]);
+  const active = hud.status === 'playing', phase = PHASES[hud.phase];
+  const counts = hud.build.reduce((all, id) => ({ ...all, [id]: (all[id] || 0) + 1 }), {});
+  function openHelp() {
+    resumeAfterHelp.current = world.current?.state.status === 'playing';
+    if (resumeAfterHelp.current) world.current.pause();
+    help.current.showModal();
+  }
+  function closeHelp() {
+    if (resumeAfterHelp.current && world.current?.state.status === 'paused') world.current.pause();
+    resumeAfterHelp.current = false;
+  }
+  function joystick(e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - r.left - r.width / 2) / (r.width * .35), z = (e.clientY - r.top - r.height / 2) / (r.height * .35);
+    const d = Math.max(1, Math.hypot(x, z));
+    if (world.current) world.current.touch = { ...world.current.touch, x: x / d, z: z / d };
+  }
+  function stopMove() { if (world.current) Object.assign(world.current.touch, { x: 0, z: 0 }); }
+  return <div className={`survivor-app ${hud.hurt > 0 ? 'is-hurt' : ''}`}>
+    <header className="survivor-header">
+      <h1>WILDBLOOM</h1>
+      <div className="header-actions">
+        <button onClick={openHelp}>操作方法</button>
+        <button className="pause-button" disabled={!['playing', 'paused'].includes(hud.status)} onClick={() => world.current?.pause()}>{hud.status === 'paused' ? '再開する' : '一時停止'}</button>
       </div>
-      <aside className="phase-panel"><div className="eyebrow">THE EXPEDITION</div><h2>夜明けまで、生き抜く。</h2><div className="phase-list">{PHASES.map((p,i)=><div key={p.name} className={`${i===hud.phase?'current':''} ${i<hud.phase?'complete':''}`}><span className="phase-number">{i<hud.phase?'✓':`0${i+1}`}</span><div><strong>{p.name}</strong><span>{i*PHASE_SECONDS}s — {(i+1)*PHASE_SECONDS}s</span></div>{i===hud.phase&&<span className="phase-dot"/>}</div>)}</div><p>敵を避けて、光を集めよう。<br/>攻撃は自動。選択はあなた次第。</p></aside>
-      {hud.status!=='ready'&&<div className="phase-banner" key={hud.phase}><span className="eyebrow">PHASE 0{hud.phase+1}</span><strong>{phase.name}</strong></div>}
-      <div className="world-bottom"><div className="build-panel"><div className="eyebrow">YOUR BUILD</div><div className="build-items"><div className="build-item" title="初期装備：自動射撃の杖">ϟ<small>1</small></div>{build.map(([id,n])=><div className="build-item" key={id} title={`${UPGRADES.find(u=>u.id===id).name} ×${n}`}>{UPGRADES.find(u=>u.id===id).icon}<small>{n}</small></div>)}{!build.length&&<span className="empty-build">琥珀色の結晶を拾って強化</span>}</div></div><div className="dash-info"><span>回避ステップ</span><div className="meter"><span style={{width:`${(1-hud.dashCooldown/3.5)*100}%`}}/></div><kbd>SPACE</kbd></div></div>
-      {active&&<div className="touch-controls"><div className="joystick" aria-label="タッチ移動" onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);joystick(e);}} onPointerMove={e=>{if(e.buttons)joystick(e);}} onPointerUp={()=>{if(world.current)world.current.touch={x:0,z:0};}} onPointerCancel={()=>{if(world.current)world.current.touch={x:0,z:0};}}><span>MOVE</span></div><button className="touch-dash" onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);if(world.current)world.current.touch.dash=true;}} onPointerUp={()=>{if(world.current)world.current.touch.dash=false;}} onPointerCancel={()=>{if(world.current)world.current.touch.dash=false;}}>回避</button></div>}
-      {hud.status==='ready'&&!error&&<div className="intro-layer"><section className="intro-card"><div className="eyebrow">A LITTLE WORLD. A WILD ADVENTURE.</div><h1>WILD<br/><span>BLOOM</span><i>✳</i></h1><p className="intro-jp">小さな旅人の、大きな生存戦略。</p><p className="intro-description">光の杖を手に、目覚める森へ。<br/>迫る群れをかわし、力を選び、<br/>3つのフェーズを生き抜こう。</p><button className="primary start-button" onClick={()=>world.current?.start()}>森へ踏み出す <span>PLAY</span></button><div className="intro-controls"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移動</span><span><kbd>SPACE</kbd> 回避</span><span>✧ 自動攻撃</span></div><div className="run-info"><span>1 RUN / 2 MIN 15 SEC</span><span>BEST / {best} KILLS</span></div></section><div className="world-caption"><span>THE VERDANT WILDS</span><p>見知らぬ森で、あなただけのビルドを。</p></div></div>}
-      {hud.status==='upgrade'&&<div className="overlay upgrade-overlay"><section className="upgrade-modal" role="dialog" aria-modal="true" aria-label="強化を選択"><span className="eyebrow">A NEW POSSIBILITY</span><h2>どんな力を、育てよう。</h2><p>3つのうち1つを選択。選択中は時間が止まります。</p><div className="upgrade-cards">{hud.choices.map(c=><button key={c.id} onClick={()=>world.current?.upgrade(c.id)}><span className="upgrade-type">{c.type}</span><span className="upgrade-icon">{c.icon}</span><h3>{c.name}</h3><p>{c.detail}</p><span className="choose-label">この力を選ぶ</span></button>)}</div></section></div>}
-      {hud.status==='paused'&&<div className="overlay"><section className="modal" role="dialog" aria-modal="true" aria-label="一時停止"><span className="eyebrow">TAKE A BREATH</span><h2>ひとやすみ。</h2><p>森は、あなたを待っています。</p><div className="button-row"><button className="primary" onClick={()=>world.current?.pause()}>冒険を続ける</button><button onClick={()=>world.current?.start()}>最初から</button></div></section></div>}
-      {['won','lost'].includes(hud.status)&&<div className="overlay"><section className="modal result-modal" role="dialog" aria-modal="true" aria-label="結果"><span className="eyebrow">{hud.status==='won'?'THE DAWN IS YOURS':'EVERY END IS A BEGINNING'}</span><h2>{hud.status==='won'?'夜明けに、咲く。':'また、芽吹こう。'}</h2><p>{hud.status==='won'?'3フェーズを生存。小さな旅人は、森の夜を越えました。':'集める力と進む道を変えて、もう一度。'}</p><div className="result-stats"><div><strong>{clock(hud.time)}</strong><span>生存時間</span></div><div><strong>{hud.kills}</strong><span>撃破数</span></div><div><strong>{hud.build.length}</strong><span>取得した強化</span></div></div><button className="primary" onClick={()=>world.current?.start()}>新しい冒険へ</button></section></div>}
-      {error&&<div className="overlay"><section className="modal" role="alert"><h2>3D描画について</h2><p>{error}</p><button onClick={()=>location.reload()}>再読み込み</button></section></div>}
-    </main><footer className="survivor-footer"><span><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> 移動 <kbd>SPACE</kbd> 回避 <kbd>P</kbd> 一時停止</span><span>✧ 自動攻撃 <b>◆</b> 経験値 <b className="amber">◆</b> 強化</span><span>LOW-POLY / HIGH POSSIBILITIES</span></footer>
+    </header>
+    <main className="survivor-layout">
+      <section className="run-hud" aria-label="プレイ状況">
+        <div className="health-stat"><div className="stat-label"><span>体力</span><strong>{Math.ceil(hud.hp)} <small>/ {hud.maxHp}</small></strong></div><Meter label="体力" value={hud.hp} max={hud.maxHp} className="health" /></div>
+        <div className="xp-stat"><div className="stat-label"><span>レベル {hud.level}</span><strong>{hud.xp} <small>/ {hud.nextXp}</small></strong></div><Meter label="経験値" value={hud.xp} max={hud.nextXp} className="experience" /></div>
+        <div className="time-stat"><span>残り時間</span><strong className="survival-time">{clock(Math.ceil(TOTAL_SECONDS - hud.time))}</strong></div>
+        <div className="kill-stat"><span>撃破数</span><strong>{hud.kills}</strong></div>
+        <div className="phase-stat"><strong style={{ color: phase.color }}>{phase.name}</strong><span>{statusLabels[hud.status]}</span></div>
+      </section>
+      <section className="world-shell" aria-label="ゲーム画面">
+        <div className="world-canvas" ref={container} /><div className="world-vignette" />
+        {active && <div className="touch-controls">
+          <div className="joystick" aria-label="タッチ移動" onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); joystick(e); }} onPointerMove={e => { if (e.buttons) joystick(e); }} onPointerUp={stopMove} onPointerCancel={stopMove}><span>移動</span></div>
+          <button className="touch-dash" aria-label="回避する" onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); if (world.current) world.current.touch.dash = true; }} onPointerUp={() => { if (world.current) world.current.touch.dash = false; }} onPointerCancel={() => { if (world.current) world.current.touch.dash = false; }}>回避</button>
+        </div>}
+        {hud.status === 'ready' && !error && <div className="run-overlay intro-layer"><section className="run-card">
+          <h2>WILDBLOOM</h2><p>2分15秒生存するとクリア。<br />地形を使って敵をかわそう。</p>
+          <button className="primary" onClick={() => world.current?.start()}>ゲーム開始</button>
+          <span className="best-record">自己ベスト {best} 体</span>
+        </section></div>}
+        {hud.status === 'paused' && !error && <div className="run-overlay"><section className="run-card" role="dialog" aria-modal="true" aria-label="一時停止">
+          <h2>一時停止</h2><div className="run-buttons"><button className="primary" onClick={() => world.current?.pause()}>再開する</button><button onClick={() => world.current?.start()}>最初から</button></div>
+        </section></div>}
+        {['won', 'lost'].includes(hud.status) && !error && <div className="run-overlay"><section className="run-card result-card" role="dialog" aria-modal="true" aria-label="結果">
+          <h2>{statusLabels[hud.status]}</h2>
+          <dl className="run-results"><div><dt>生存時間</dt><dd>{clock(hud.time)}</dd></div><div><dt>撃破数</dt><dd>{hud.kills}</dd></div><div><dt>強化数</dt><dd>{hud.build.length}</dd></div></dl>
+          <button className="primary" onClick={() => world.current?.start()}>もう一度プレイ</button>
+        </section></div>}
+        {error && <div className="run-overlay"><section className="run-card" role="alert"><h2>描画を開始できません</h2><p>{error}</p><button onClick={() => location.reload()}>再読み込み</button></section></div>}
+      </section>
+      <section className="upgrade-bar" aria-label="強化と操作">
+        <div className="upgrade-heading"><h2>強化</h2><span className="terrain-status">{hud.terrain}</span></div>
+        <div className="upgrade-items">{UPGRADES.map(u => <div className={`upgrade-item ${counts[u.id] ? 'acquired' : ''}`} key={u.id} title={u.detail} aria-label={`${u.name}：${counts[u.id] || 0}回。${u.detail}`}><span className="upgrade-symbol" aria-hidden="true">{u.icon}</span><span>{u.name}</span><strong>{counts[u.id] || 0}</strong></div>)}</div>
+        <div className="run-controls"><p><span>WASD / 方向キー：移動</span><span>Space：回避</span><span>P / Esc：一時停止</span></p><div className="dash-status"><span>回避 {hud.dashCooldown > 0 ? `${hud.dashCooldown.toFixed(1)}秒` : '準備完了'}</span><Meter label="回避の再使用" value={hud.stats.dashDelay - hud.dashCooldown} max={hud.stats.dashDelay} /></div><span className="auto-attack">自動攻撃</span></div>
+      </section>
+    </main>
+    <dialog className="upgrade-dialog" ref={upgrades} onCancel={e => e.preventDefault()} aria-labelledby="upgrade-title">
+      <div className="upgrade-title"><h2 id="upgrade-title">強化を選択</h2><span>残り {hud.pendingUpgrades} 回</span></div>
+      <div className="upgrade-choices">{UPGRADES.map((u, i) => <button key={u.id} disabled={(counts[u.id] || 0) >= (u.maxLevel || Infinity)} onClick={() => world.current?.upgrade(u.id)}>
+        <span className="choice-number" aria-hidden="true">{i + 1}</span><strong>{u.name}</strong><span className="choice-level">取得 {counts[u.id] || 0}{u.maxLevel ? ` / ${u.maxLevel}` : ''} 回</span><span className="choice-detail">{u.detail}</span>
+      </button>)}</div>
+    </dialog>
+    <dialog className="survivor-help" ref={help} onClose={closeHelp} aria-labelledby="survivor-help-title">
+      <div className="help-heading"><h2 id="survivor-help-title">操作方法</h2><button aria-label="操作方法を閉じる" onClick={() => help.current.close()}>閉じる</button></div>
+      <dl><div><dt>移動</dt><dd>WASD / 方向キー</dd></div><div><dt>回避</dt><dd>Space</dd></div><div><dt>一時停止・再開</dt><dd>P / Esc</dd></div></dl>
+      <p>攻撃は自動です。タッチ操作では左のパッドで移動し、右のボタンで回避します。</p>
+      <p>経験値でレベルが上がるか、琥珀色の結晶を拾うと、火力・機動力・耐久力から1つ選べます。選択中は時間が止まります。数字キー1〜3でも選択できます。</p>
+      <p>岩壁は移動と双方の弾を遮ります。突進の予告線から横に逃げ、岩壁へ誘導すると敵が気絶します。</p>
+      <p>高台は射程 +4・威力 +20%。登り坂では敵の足が鈍ります。中央のぬかるみは自分の移動速度を32%下げます。琥珀色の結晶と回復は決まった地点に出現します。</p>
+      <p>45秒ごとにフェーズが変わり、2分15秒生存するとクリアです。</p>
+    </dialog>
   </div>;
 }
