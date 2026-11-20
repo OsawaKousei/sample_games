@@ -67,7 +67,7 @@ export default function App() {
           <button className="touch-dash" aria-label="回避する" onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); if (world.current) world.current.touch.dash = true; }} onPointerUp={() => { if (world.current) world.current.touch.dash = false; }} onPointerCancel={() => { if (world.current) world.current.touch.dash = false; }}>回避</button>
         </div>}
         {hud.status === 'ready' && !error && <div className="run-overlay intro-layer"><section className="run-card">
-          <h2>WILDBLOOM</h2><p>2分15秒生存するとクリア。<br />地形を使って敵をかわそう。</p>
+          <h2>WILDBLOOM</h2><p>2分15秒生存するとクリア。<br />フィールドの結晶を拾って、<br />ステータスを強化できます。</p>
           <button className="primary" onClick={() => world.current?.start()}>ゲーム開始</button>
           <span className="best-record">自己ベスト {best} 体</span>
         </section></div>}
