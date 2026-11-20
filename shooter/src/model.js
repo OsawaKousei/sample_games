@@ -1,8 +1,8 @@
 export const WIDTH = 480, HEIGHT = 720, WAVE_SECONDS = 25;
 export const STAGES = [
-  { name: '青の航路', english: 'BLUE FRONTIER', boss: 'SENTINEL', color: '#7ce6e9', rgb: 0x7ce6e9, background: 0x071b2b },
-  { name: '灼熱の回廊', english: 'EMBER CORRIDOR', boss: 'HELIX', color: '#ffbe77', rgb: 0xffbe77, background: 0x291b26 },
-  { name: '星の終着点', english: 'THE LAST ORBIT', boss: 'OBLIVION', color: '#c8a1ff', rgb: 0xc8a1ff, background: 0x1c1534 },
+  { name: 'STAGE 1', color: '#7ce6e9', rgb: 0x7ce6e9, background: 0x071b2b },
+  { name: 'STAGE 2', color: '#ffbe77', rgb: 0xffbe77, background: 0x291b26 },
+  { name: 'STAGE 3', color: '#c8a1ff', rgb: 0xc8a1ff, background: 0x1c1534 },
 ];
 export function createGame(random = Math.random) {
   return { status: 'ready', stage: 0, time: 0, totalTime: 0, player: { x: WIDTH/2, y: HEIGHT-100, hp: 5, maxHp: 5, power: 1, invincible: 0 },

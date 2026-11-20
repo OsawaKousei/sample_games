@@ -1,29 +1,119 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { mountGame } from './Game.js';
 import { createGame, snapshot, STAGES, WAVE_SECONDS } from './model.js';
-const format = n => String(n).padStart(7,'0');
-export default function App(){
-  const host=useRef(null),game=useRef(null),[hud,setHud]=useState(()=>snapshot(createGame()));
-  const [best,setBest]=useState(()=>{try{return Number(localStorage.getItem('starfall-best')||0);}catch{return 0;}});
-  useEffect(()=>{game.current=mountGame(host.current,setHud);return()=>{game.current.destroy();game.current=null;};},[]);
-  useEffect(()=>{if(['won','lost'].includes(hud.status)&&hud.score>best){setBest(hud.score);try{localStorage.setItem('starfall-best',String(hud.score));}catch{ /* Best score is optional. */ }}},[hud.status,hud.score,best]);
-  const stage=STAGES[hud.stage];
-  return <div className="shooter-app" style={{'--stage-color':stage.color}}>
-    <header className="topbar"><div className="brand"><span className="brand-mark">✦</span> SIGNAL ARCADE</div><div className="collection"><span className="active">02 / STARFALL</span><span>VERTICAL SHOOTER</span></div><span className="badge">FLIGHT SYSTEM / ONLINE</span></header>
+
+const format = n => String(n).padStart(7, '0');
+const statusLabels = { ready: '待機中', playing: 'プレイ中', paused: '一時停止', transition: 'クリア', won: 'クリア', lost: '終了' };
+
+export default function App() {
+  const host = useRef(null), game = useRef(null), help = useRef(null), resumeAfterHelp = useRef(false);
+  const [hud, setHud] = useState(() => snapshot(createGame()));
+  const [best, setBest] = useState(() => {
+    try { return Number(localStorage.getItem('starfall-best') || 0); } catch { return 0; }
+  });
+  useEffect(() => {
+    game.current = mountGame(host.current, setHud);
+    return () => { game.current.destroy(); game.current = null; };
+  }, []);
+  useEffect(() => {
+    if (['won', 'lost'].includes(hud.status) && hud.score > best) {
+      setBest(hud.score);
+      try { localStorage.setItem('starfall-best', String(hud.score)); } catch { /* Best score is optional. */ }
+    }
+  }, [hud.status, hud.score, best]);
+
+  const stage = STAGES[hud.stage];
+  const progress = hud.boss || ['transition', 'won'].includes(hud.status) ? 100 : Math.min(100, Math.floor(hud.time / WAVE_SECONDS * 100));
+  const openHelp = () => {
+    resumeAfterHelp.current = ['playing', 'transition'].includes(hud.status);
+    if (resumeAfterHelp.current) game.current?.pause();
+    game.current?.setInputEnabled(false);
+    help.current.showModal();
+  };
+  const closeHelp = () => {
+    game.current?.setInputEnabled(true);
+    if (resumeAfterHelp.current) game.current?.pause();
+    resumeAfterHelp.current = false;
+  };
+
+  return <div className="shooter-app" style={{ '--stage-color': stage.color }}>
+    <header className="flight-header">
+      <h1>STARFALL</h1>
+      <button className="help-button" onClick={openHelp}>操作方法</button>
+    </header>
     <main className="flight-layout">
-      <aside className="flight-left"><div className="eyebrow">BEYOND THE LAST LIGHT</div><h1>STAR<br/><span>FALL</span><i>✦</i></h1><p className="game-subtitle">星の果てまで、撃ち抜け。</p><div className="mission-route"><div className="rail-heading"><span>MISSION ROUTE</span><span>03 SECTORS</span></div>{STAGES.map((s,i)=><div key={s.name} className={`route-card ${hud.stage===i?'current':''} ${hud.stage>i?'complete':''}`}><div className="route-index">{hud.stage>i?'✓':`0${i+1}`}</div><div><span>{s.english}</span><h2>{s.name}</h2></div><div className="route-icon">{['◉','◇','✦'][i]}</div></div>)}</div><div className="ship-dossier"><div className="eyebrow">YOUR AIRCRAFT</div><svg viewBox="0 0 200 120" aria-label="自機 Astra-01"><path d="M100 12L111 54 153 90 115 82 100 105 85 82 47 90 89 54Z" fill="#c3dde0" stroke="#8acfd7"/><path d="M100 32L106 71 100 79 94 71Z" fill="#47a8bb"/><path d="M95 100L100 118 105 100" fill="#ffb878"/><path d="M15 63H60M140 63H185M100 0V8" stroke="#ffffff33" strokeDasharray="3 4"/></svg><div className="aircraft-title"><strong>ASTRA–01</strong><span>INTERCEPTOR</span></div><p>小さな機体に、最後の希望を。</p></div><div className="left-bottom">A THREE-STAGE ARCADE EXPERIENCE<br/><span>REACT × PHASER</span></div></aside>
-      <section className="game-column"><div className="viewport-label"><span><i/>{hud.status==='playing'?'LIVE FLIGHT':'FLIGHT DECK'}</span><span>SECTOR 0{hud.stage+1}</span></div><div className="game-viewport"><div className="phaser-host" ref={host}/><div className="screen-corners"/>
-          {hud.boss&&<div className="boss-hud"><div><span>{stage.boss}</span><strong>PHASE {hud.boss.phase}</strong></div><div className="meter"><span style={{width:`${hud.boss.hp/hud.boss.maxHp*100}%`}}/></div></div>}
-          {hud.status==='ready'&&<div className="flight-overlay start-overlay"><div className="start-emblem">✦</div><div className="eyebrow">ALL SYSTEMS READY</div><h2>READY TO<br/><span>TAKE OFF?</span></h2><p>3つの宙域、3体のボス。<br/>その先にある光を目指して。</p><button className="primary" onClick={()=>game.current?.start()}>出撃する <span>START MISSION</span></button><span className="start-note">自動射撃 ON · 移動に集中しよう</span></div>}
-          {hud.status==='paused'&&<div className="flight-overlay"><span className="eyebrow">FLIGHT ON HOLD</span><h2>PAUSED</h2><p>準備ができたら、再び空へ。</p><button className="primary" onClick={()=>game.current?.pause()}>飛行を再開</button><button className="restart-link" onClick={()=>game.current?.start()}>最初から</button></div>}
-          {hud.status==='transition'&&<div className="flight-overlay transition-overlay"><span className="eyebrow">SECTOR 0{hud.stage+1} COMPLETE</span><h2>CLEAR</h2><p>体力 +1 · ボム +1<br/>次の宙域へ移動しています…</p><span className="sector-next">NEXT / {STAGES[hud.stage+1]?.english}</span></div>}
-          {['won','lost'].includes(hud.status)&&<div className="flight-overlay result-overlay"><span className="eyebrow">{hud.status==='won'?'ALL SECTORS SECURED':'SIGNAL LOST'}</span><h2>{hud.status==='won'?<>MISSION<br/><span>COMPLETE</span></>:<>GAME<br/><span>OVER</span></>}</h2><p>{hud.status==='won'?'最後の光は、あなたが守った。':'もう一度、星の向こうへ。'}</p><div className="final-score"><span>FINAL SCORE</span><strong>{format(hud.score)}</strong></div><div className="result-stats"><div><strong>{hud.kills}</strong><span>撃破数</span></div><div><strong>{hud.accuracy}%</strong><span>命中率</span></div></div><button className="primary" onClick={()=>game.current?.start()}>再出撃する</button></div>}
-        </div><div className="viewport-bottom"><span>◈ ASTRA–01</span><span>HITBOX / CENTER DOT</span><span>60 FPS TARGET</span></div>
+      <section className="game-column" aria-label="ゲーム画面">
+        <div className="viewport-label"><h2>{stage.name}</h2><span role="status">{statusLabels[hud.status]}</span></div>
+        <div className="game-viewport">
+          <div className="phaser-host" ref={host} />
+          {hud.boss && <div className="boss-hud">
+            <div><span>BOSS</span><span>PHASE {hud.boss.phase}</span></div>
+            <div className="meter" role="progressbar" aria-label="ボスの体力" aria-valuenow={Math.round(hud.boss.hp / hud.boss.maxHp * 100)} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${hud.boss.hp / hud.boss.maxHp * 100}%` }} /></div>
+          </div>}
+          {hud.status === 'ready' && <div className="flight-overlay start-overlay">
+            <h2>{stage.name}</h2>
+            <button className="primary" onClick={() => game.current?.start()}>ゲーム開始</button>
+          </div>}
+          {hud.status === 'paused' && <div className="flight-overlay">
+            <h2>一時停止</h2>
+            <button className="primary" onClick={() => game.current?.pause()}>再開する</button>
+            <button className="restart-link" onClick={() => game.current?.start()}>最初から</button>
+          </div>}
+          {hud.status === 'transition' && <div className="flight-overlay transition-overlay">
+            <h2>{stage.name}<br />CLEAR</h2>
+            <p>シールド +1 · ボム +1</p>
+            <span className="stage-next">次は {STAGES[hud.stage + 1]?.name}</span>
+          </div>}
+          {['won', 'lost'].includes(hud.status) && <div className="flight-overlay result-overlay">
+            <h2>{hud.status === 'won' ? '全ステージクリア' : 'ゲームオーバー'}</h2>
+            <div className="final-score"><span>スコア</span><strong>{format(hud.score)}</strong></div>
+            <div className="result-stats"><div><strong>{hud.kills}</strong><span>撃破数</span></div><div><strong>{hud.accuracy}%</strong><span>命中率</span></div></div>
+            <button className="primary" onClick={() => game.current?.start()}>もう一度プレイ</button>
+          </div>}
+        </div>
+        <div className="stage-progress" role="progressbar" aria-label="ステージ進行" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${progress}%` }} /></div>
       </section>
-      <aside className="flight-right"><div className="score-panel"><span className="eyebrow">CURRENT SCORE</span><strong className="score-number mono">{format(hud.score)}</strong><div className="best-score"><span>PERSONAL BEST</span><strong className="mono">{format(best)}</strong></div></div><section className="systems-panel"><div className="rail-heading"><span>AIRCRAFT STATUS</span></div><div className="system-label"><span>SHIELD</span><span>{hud.hp} / 5</span></div><div className="shield-bars">{Array.from({length:5},(_,i)=><span key={i} className={i<hud.hp?'filled':''}/>)}</div><div className="system-label"><span>FIREPOWER</span><span>LEVEL 0{hud.power}</span></div><div className="power-bars">{[1,2,3].map(i=><span key={i} className={i<=hud.power?'filled':''}/>)}</div><div className="system-label bomb-label"><span>NOVA BOMB</span><span className="bombs">{Array.from({length:3},(_,i)=><i key={i} className={i<hud.bombs?'available':''}>◈</i>)}</span></div><button className="bomb-button" disabled={hud.status!=='playing'||!hud.bombs} onClick={()=>game.current?.bomb()}>ボムを使う <kbd>X</kbd></button></section>
-        <section className="controls-panel"><div className="rail-heading"><span>FLIGHT MANUAL</span></div><div className="control-line"><span>移動</span><div><kbd>WASD</kbd><span> / </span><kbd>↑↓←→</kbd></div></div><div className="control-line"><span>ショット</span><div><kbd>SPACE</kbd><span> / </span><kbd>Z</kbd></div></div><div className="control-line"><span>低速移動</span><kbd>SHIFT</kbd></div><div className="control-line"><span>一時停止</span><kbd>P</kbd></div><button className={`auto-toggle ${hud.autoFire?'on':''}`} aria-pressed={hud.autoFire} onClick={()=>game.current?.toggleAuto()}><span>自動射撃</span><strong>{hud.autoFire?'ON':'OFF'}</strong></button><p>タッチ操作：盤面をドラッグで移動。<br/>自機中央の白い点が当たり判定です。</p></section>
-        <div className="flight-tip"><span>FLIGHT TIP</span><p>ボスのHPが半分になると攻撃が変化。ボムは敵弾を消し、短時間の無敵を付与します。</p></div><button className="pause-flight" disabled={!['playing','paused','transition'].includes(hud.status)} onClick={()=>game.current?.pause()}>{hud.status==='paused'?'飛行を再開':'Ⅱ 一時停止'}</button>
+      <aside className="flight-right" aria-label="スコアと操作">
+        <section className="score-panel" aria-label="スコア">
+          <div className="score-label">SCORE</div><strong className="score-number">{format(hud.score)}</strong>
+          <div className="best-score"><span>BEST</span><strong>{format(best)}</strong></div>
+        </section>
+        <ol className="stage-list" aria-label="ステージ">
+          {STAGES.map((s, i) => <li key={s.name} className={`${hud.stage === i ? 'current' : ''} ${hud.stage > i || hud.status === 'won' ? 'complete' : ''}`} aria-current={hud.stage === i ? 'step' : undefined}><span>{s.name}</span>{(hud.stage > i || hud.status === 'won') && <span className="stage-check" aria-label="クリア">✓</span>}</li>)}
+        </ol>
+        <section className="systems-panel" aria-label="機体状態">
+          <div className="resource shield-resource">
+            <div className="system-label"><span>シールド</span><strong>{hud.hp}<span> / 5</span></strong></div>
+            <div className="shield-bars" aria-hidden="true">{Array.from({ length: 5 }, (_, i) => <span key={i} className={i < hud.hp ? 'filled' : ''} />)}</div>
+          </div>
+          <div className="resource power-resource">
+            <div className="system-label"><span>火力</span><strong>{hud.power}<span> / 3</span></strong></div>
+            <div className="power-bars" aria-hidden="true">{[1, 2, 3].map(i => <span key={i} className={i <= hud.power ? 'filled' : ''} />)}</div>
+          </div>
+          <div className="resource bomb-resource">
+            <div className="system-label"><span>ボム</span><strong>{hud.bombs}<span> / 3</span></strong></div>
+            <div className="bombs" aria-hidden="true">{Array.from({ length: 3 }, (_, i) => <span key={i} className={i < hud.bombs ? 'available' : ''} />)}</div>
+          </div>
+        </section>
+        <div className="flight-actions">
+          <button className={`auto-toggle ${hud.autoFire ? 'on' : ''}`} aria-pressed={hud.autoFire} onClick={() => game.current?.toggleAuto()}><span>自動射撃</span><strong>{hud.autoFire ? 'ON' : 'OFF'}</strong></button>
+          <button className="bomb-button" disabled={hud.status !== 'playing' || !hud.bombs} onClick={() => game.current?.bomb()}><span>ボムを使う</span><kbd>X</kbd></button>
+          <button className="pause-flight" disabled={!['playing', 'paused', 'transition'].includes(hud.status)} onClick={() => game.current?.pause()}>{hud.status === 'paused' ? '再開する' : '一時停止'}</button>
+        </div>
+        <p className="input-hint"><span>WASD / 方向キーで移動</span><span>タッチ：ドラッグで移動</span></p>
       </aside>
-    </main><footer className="flight-footer"><span>SIGNAL ARCADE / THE ACTION COLLECTION</span><span>SECTOR PROGRESS <span className="sector-progress"><i style={{width:`${hud.boss?100:Math.min(100,hud.time/WAVE_SECONDS*100)}%`}}/></span> {hud.boss?'BOSS ENCOUNTER':`${Math.min(100,Math.floor(hud.time/WAVE_SECONDS*100))}%`}</span></footer>
+    </main>
+    <dialog className="help-dialog" ref={help} onClose={closeHelp} aria-labelledby="help-title">
+      <div className="help-heading"><h2 id="help-title">操作方法</h2><button aria-label="操作方法を閉じる" onClick={() => help.current.close()}>閉じる</button></div>
+      <dl className="control-list">
+        <div><dt>移動</dt><dd><kbd>WASD</kbd> / <kbd>↑↓←→</kbd></dd></div>
+        <div><dt>ショット</dt><dd><kbd>SPACE</kbd> / <kbd>Z</kbd></dd></div>
+        <div><dt>低速移動</dt><dd><kbd>SHIFT</kbd></dd></div>
+        <div><dt>ボム</dt><dd><kbd>X</kbd></dd></div>
+        <div><dt>一時停止 / 再開</dt><dd><kbd>P</kbd> / <kbd>ESC</kbd></dd></div>
+      </dl>
+      <p>タッチ操作では、ゲーム画面をドラッグして移動します。自動射撃をONにすると、ショットを撃ち続けます。</p>
+      <p>自機中央の白い点が当たり判定です。ボムは敵弾を消し、短時間無敵になります。</p>
+    </dialog>
   </div>;
 }

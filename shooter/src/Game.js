@@ -3,8 +3,9 @@ import { createGame, tick, bomb, snapshot, WIDTH, HEIGHT, STAGES } from './model
 export function mountGame(parent,onChange){
   let gameState=createGame(),sceneRef=null;
   const controller={
-    start(){gameState=createGame();gameState.status='playing';sceneRef?.input.keyboard.resetKeys();onChange(snapshot(gameState));},
+    start(){const autoFire=gameState.autoFire;gameState=createGame();gameState.autoFire=autoFire;gameState.status='playing';sceneRef?.input.keyboard.resetKeys();onChange(snapshot(gameState));},
     pause(){if(gameState.status==='playing'||gameState.status==='transition'){gameState.previousStatus=gameState.status;gameState.status='paused';}else if(gameState.status==='paused')gameState.status=gameState.previousStatus||'playing';sceneRef?.input.keyboard.resetKeys();onChange(snapshot(gameState));},
+    setInputEnabled(enabled){if(sceneRef){sceneRef.input.keyboard.resetKeys();sceneRef.input.keyboard.enabled=enabled;}},
     bomb(){bomb(gameState);},toggleAuto(){gameState.autoFire=!gameState.autoFire;onChange(snapshot(gameState));},
     destroy(){window.removeEventListener('blur',blur);game.destroy(true);}
   };
